@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO equipment (id, tag_number, name, description, location, criticality, status, equipment_type, parent_id)\n         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 9
+    },
+    "nullable": []
+  },
+  "hash": "389700659793f6d62e635a7230fd4fb9ac626428f7c01218f68ea6b7a2bcacdf"
+}
