@@ -1,6 +1,6 @@
-use sqlx::sqlite::SqlitePool;
+
 use tauri::Manager;
-use commands::create_equipment;
+use commands::{create_equipment, get_all_equipment, get_equipment, update_equipment, delete_equipment};
 
 
 
@@ -35,7 +35,13 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, create_equipment])
+        .invoke_handler(tauri::generate_handler![
+            greet, 
+            create_equipment,
+            get_all_equipment,
+            get_equipment,
+            update_equipment,
+            delete_equipment])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
