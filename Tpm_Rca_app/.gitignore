@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 build_errors.txt
+*.db
+*.db-shm
+*.db-wal
