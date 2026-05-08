@@ -8,13 +8,14 @@
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
+    
   },
   "app": {
     "windows": [
       {
         "title": "tpm_rca_app",
-        "width": 800,
-        "height": 600
+        "width": 1200,
+        "height": 800
       }
     ],
     "security": {
