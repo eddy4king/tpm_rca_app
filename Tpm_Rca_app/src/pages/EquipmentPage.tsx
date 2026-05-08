@@ -15,6 +15,28 @@ interface Equipment {
   updated_at: string | null;
 }
 
+function getStatusColor(status: string | null) {
+  switch (status) {
+    case "Running": return "bg-green-100 text-green-800";
+    case "Standby": return "bg-blue-100 text-blue-800";
+    case "Under Maintenance": return "bg-yellow-100 text-yellow-800";
+    case "Failed": return "bg-red-100 text-red-800";
+    default: return "bg-gray-100 text-gray-800";
+  }
+}
+
+function getCriticalityColor(criticality: string | null) {
+  switch (criticality) {
+    case "Critical": return "bg-red-100 text-red-800";
+    case "High": return "bg-orange-100 text-orange-800";
+    case "Medium": return "bg-yellow-100 text-yellow-800";
+    case "Low": return "bg-green-100 text-green-800";
+    default: return "bg-gray-100 text-gray-800";
+  }
+}
+
+
+
 function EquipmentPage() {
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,8 +90,22 @@ function EquipmentPage() {
     }
   }
 
+  async function handleDelete(id: string) {
+    try {
+        await invoke("delete_equipment", { id });
+        loadEquipment();
+    } catch (err) {
+        setError(String(err));
+    }
+  }
+
   if (loading) return <p className="text-gray-500">Loading equipment...</p>;
   if (error) return <p className="text-red-500">Error: {error}</p>;
+
+
+
+
+
 
   return (
     <div>
@@ -120,6 +156,7 @@ function EquipmentPage() {
               <th className="p-3 text-left">Location</th>
               <th className="p-3 text-left">Status</th>
               <th className="p-3 text-left">Criticality</th>
+              <th className="p-3 text-left">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -129,8 +166,24 @@ function EquipmentPage() {
                 <td className="p-3">{eq.name}</td>
                 <td className="p-3">{eq.equipment_type}</td>
                 <td className="p-3">{eq.location}</td>
-                <td className="p-3">{eq.status}</td>
-                <td className="p-3">{eq.criticality}</td>
+                <td className="p-3">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(eq.status)}`}>
+                        {eq.status}
+                    </span>
+                    </td>
+                <td className="p-3">
+                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCriticalityColor(eq.criticality)}`}>
+                        {eq.criticality}
+                    </span>
+                    </td>
+                <td className="p-3">
+                    <button
+                        onClick={() => handleDelete(eq.id)}
+                        className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-400"
+                    >
+                        Delete
+                    </button>
+                    </td>
               </tr>
             ))}
           </tbody>
