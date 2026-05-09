@@ -35,13 +35,13 @@ function getCriticalityColor(criticality: string | null) {
   }
 }
 
-
-
 function EquipmentPage() {
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
   const [form, setForm] = useState({
     tag_number: "",
     name: "",
@@ -90,29 +90,127 @@ function EquipmentPage() {
     }
   }
 
+  async function handleUpdate() {
+    try {
+      await invoke("update_equipment", {
+        payload: {
+          id: editingId,
+          tag_number: form.tag_number || null,
+          name: form.name || null,
+          description: form.description || null,
+          location: form.location || null,
+          criticality: form.criticality || null,
+          status: form.status || null,
+          equipment_type: form.equipment_type || null,
+        },
+      });
+      setShowForm(false);
+      setEditingId(null);
+      loadEquipment();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  function handleEdit(eq: Equipment) {
+    setEditingId(eq.id);
+    setForm({
+      tag_number: eq.tag_number || "",
+      name: eq.name || "",
+      description: eq.description || "",
+      location: eq.location || "",
+      criticality: eq.criticality || "Medium",
+      status: eq.status || "Running",
+      equipment_type: eq.equipment_type || "",
+      parent_id: eq.parent_id || "",
+    });
+    setShowForm(true);
+  }
+
   async function handleDelete(id: string) {
     try {
-        await invoke("delete_equipment", { id });
-        loadEquipment();
+      await invoke("delete_equipment", { id });
+      loadEquipment();
     } catch (err) {
-        setError(String(err));
+      setError(String(err));
     }
   }
 
   if (loading) return <p className="text-gray-500">Loading equipment...</p>;
   if (error) return <p className="text-red-500">Error: {error}</p>;
 
-
-
-
-
+  if (selectedEquipment) {
+    return (
+      <div className="bg-white rounded shadow p-6 max-w-2xl">
+        <button
+          onClick={() => setSelectedEquipment(null)}
+          className="text-slate-600 hover:text-slate-800 mb-4 flex items-center gap-1"
+        >
+          ← Back to Equipment List
+        </button>
+        <h2 className="text-2xl font-bold mb-6">{selectedEquipment.name}</h2>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-sm text-gray-500">Tag Number</p>
+            <p className="font-medium">{selectedEquipment.tag_number || "—"}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Equipment Type</p>
+            <p className="font-medium">{selectedEquipment.equipment_type || "—"}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Location</p>
+            <p className="font-medium">{selectedEquipment.location || "—"}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Status</p>
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedEquipment.status)}`}>
+              {selectedEquipment.status}
+            </span>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Criticality</p>
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCriticalityColor(selectedEquipment.criticality)}`}>
+              {selectedEquipment.criticality}
+            </span>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Description</p>
+            <p className="font-medium">{selectedEquipment.description || "—"}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Created</p>
+            <p className="font-medium">{selectedEquipment.created_at || "—"}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Last Updated</p>
+            <p className="font-medium">{selectedEquipment.updated_at || "—"}</p>
+          </div>
+        </div>
+        <div className="mt-6 flex gap-2">
+          <button
+            onClick={() => { handleEdit(selectedEquipment); setSelectedEquipment(null); }}
+            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-400"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => { handleDelete(selectedEquipment.id); setSelectedEquipment(null); }}
+            className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-400"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold">Equipment Register</h2>
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => { setShowForm(!showForm); setEditingId(null); }}
           className="bg-slate-700 text-white px-4 py-2 rounded hover:bg-slate-600"
         >
           + Add Equipment
@@ -138,8 +236,11 @@ function EquipmentPage() {
             <option>Failed</option>
           </select>
           <input className="border p-2 rounded col-span-2" placeholder="Description (optional)" value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
-          <button onClick={handleCreate} className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-500 col-span-2">
-            Save Equipment
+          <button
+            onClick={editingId ? handleUpdate : handleCreate}
+            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-500 col-span-2"
+          >
+            {editingId ? "Update Equipment" : "Save Equipment"}
           </button>
         </div>
       )}
@@ -161,29 +262,39 @@ function EquipmentPage() {
           </thead>
           <tbody>
             {equipment.map((eq) => (
-              <tr key={eq.id} className="border-b hover:bg-gray-50">
+              <tr
+                key={eq.id}
+                className="border-b hover:bg-gray-50 cursor-pointer"
+                onClick={() => setSelectedEquipment(eq)}
+              >
                 <td className="p-3">{eq.tag_number}</td>
                 <td className="p-3">{eq.name}</td>
                 <td className="p-3">{eq.equipment_type}</td>
                 <td className="p-3">{eq.location}</td>
                 <td className="p-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(eq.status)}`}>
-                        {eq.status}
-                    </span>
-                    </td>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(eq.status)}`}>
+                    {eq.status}
+                  </span>
+                </td>
                 <td className="p-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCriticalityColor(eq.criticality)}`}>
-                        {eq.criticality}
-                    </span>
-                    </td>
-                <td className="p-3">
-                    <button
-                        onClick={() => handleDelete(eq.id)}
-                        className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-400"
-                    >
-                        Delete
-                    </button>
-                    </td>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getCriticalityColor(eq.criticality)}`}>
+                    {eq.criticality}
+                  </span>
+                </td>
+                <td className="p-3" onClick={e => e.stopPropagation()}>
+                  <button
+                    onClick={() => handleEdit(eq)}
+                    className="bg-blue-500 text-white px-2 py-1 rounded text-sm hover:bg-blue-400 mr-2"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleDelete(eq.id)}
+                    className="bg-red-500 text-white px-2 py-1 rounded text-sm hover:bg-red-400"
+                  >
+                    Delete
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
