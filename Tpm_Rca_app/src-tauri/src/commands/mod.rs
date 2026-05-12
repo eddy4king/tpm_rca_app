@@ -2,8 +2,7 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use tauri::State;
 use uuid::Uuid;
-use crate::models::Equipment;
-
+use crate::models::{Equipment, Downtime};
 
 
 
@@ -155,4 +154,94 @@ pub async fn delete_equipment(
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+
+#[derive(Deserialize)]
+pub struct CreateDowntimePayload{
+    pub equipment_id : String,
+    pub title : String,
+    pub description: Option<String>,
+    pub loss_category: String,
+    pub start_time: String,
+    pub reported_by: Option<String>
+}
+
+#[tauri::command]
+pub async fn create_downtime(
+    pool: State<'_, SqlitePool>,
+    payload: CreateDowntimePayload,
+) -> Result<Downtime, String> {
+    let id = Uuid::new_v4().to_string();
+
+   sqlx::query(
+        "INSERT INTO downtime (id, equipment_id, title, description, loss_category, start_time, reported_by)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+    )
+    .bind(&id)
+    .bind(&payload.equipment_id)
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .bind(&payload.loss_category)
+    .bind(&payload.start_time)
+    .bind(&payload.reported_by)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<Downtime, sqlx::Error>= sqlx::query_as::<_, Downtime>(
+        "SELECT * FROM downtime WHERE id = ?1"
+    )
+    .bind(&id)
+    .fetch_one(&*pool)
+    .await;
+
+    let downtime= result.map_err(|e: sqlx::Error| e.to_string())?;
+
+    Ok(downtime)
+}
+
+#[tauri::command]
+pub async fn get_equipment_downtime(
+    pool: State<'_, SqlitePool>,
+    equipment_id: String,
+) -> Result<Vec<Downtime>, String> {
+    let result: Result<Vec<Downtime>, sqlx::Error> = sqlx::query_as::<_, Downtime>(
+        "SELECT * FROM downtime WHERE equipment_id = ?1 ORDER BY created_at DESC"
+    )
+    .bind(&equipment_id)
+    .fetch_all(&*pool)
+    .await;
+
+    let downtime = result.map_err(|e: sqlx::Error| e.to_string())?;
+
+    Ok(downtime)  
+}
+
+#[tauri::command]
+pub async fn close_downtime(
+    pool: State<'_, SqlitePool>,
+    id: String,
+    end_time: String,
+    duration_minutes: i64,
+) -> Result<Downtime, String> {
+     sqlx::query(
+        "UPDATE downtime SET end_time = ?1, duration_minutes = ?2 WHERE id =?3"
+        ).bind(&end_time)
+        .bind(&duration_minutes)
+        .bind(&id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let result :Result<Downtime, sqlx::Error>= sqlx::query_as::<_, Downtime>(
+        "SELECT * FROM downtime WHERE id = ?1"
+    )
+    .bind(&id)
+    .fetch_one(&*pool)
+    .await;
+
+    let downtime = result.map_err(|e: sqlx::Error| e.to_string())?;
+
+    Ok(downtime)
 }

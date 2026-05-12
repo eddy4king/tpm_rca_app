@@ -1,6 +1,7 @@
 
 use tauri::Manager;
-use commands::{create_equipment, get_all_equipment, get_equipment, update_equipment, delete_equipment};
+use commands::{create_equipment, get_all_equipment, get_equipment, update_equipment, delete_equipment,
+    create_downtime, get_equipment_downtime, close_downtime};
 
 
 
@@ -41,7 +42,10 @@ pub fn run() {
             get_all_equipment,
             get_equipment,
             update_equipment,
-            delete_equipment])
+            delete_equipment,
+            create_downtime,
+            get_equipment_downtime,
+            close_downtime])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

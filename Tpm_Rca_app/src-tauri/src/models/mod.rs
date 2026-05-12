@@ -15,3 +15,18 @@ pub struct Equipment {
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
 }
+
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct Downtime {
+    pub id: String,
+    pub equipment_id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub loss_category: Option<String>,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub duration_minutes: Option<i64>,
+    pub reported_by: Option<String>,
+    pub created_at: Option<String>,
+}
