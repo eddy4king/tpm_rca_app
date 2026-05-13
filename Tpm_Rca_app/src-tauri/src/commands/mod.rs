@@ -2,7 +2,7 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use tauri::State;
 use uuid::Uuid;
-use crate::models::{Equipment, Downtime};
+use crate::models::{Equipment, Downtime, RcaInvestigation, RcaNode};
 
 
 
@@ -247,4 +247,126 @@ pub async fn close_downtime(
     let downtime = result.map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(downtime)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateInvestigationPayload {
+    pub equipment_id: String,
+    pub downtime_id: Option<String>,
+    pub title: String,
+    pub description: Option<String>,
+    pub created_by: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddRcaNodePayload {
+    pub investigation_id: String,
+    pub parent_id: Option<String>,
+    pub node_type: String,
+    pub gate_type: Option<String>,
+    pub title: String,
+    pub description: Option<String>,
+}
+
+
+#[tauri::command]
+pub async fn create_investigation(
+    pool: State<'_, SqlitePool>,
+    payload: CreateInvestigationPayload,
+) -> Result<RcaInvestigation, String> {
+    let id = Uuid::new_v4().to_string();
+
+    sqlx::query(
+        "INSERT INTO rca_investigations (id, downtime_id, equipment_id, title, description, status, created_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+    )
+    .bind(&id)
+    .bind(&payload.downtime_id)
+    .bind(&payload.equipment_id)
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .bind("Open")
+    .bind(&payload.created_by)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<RcaInvestigation, sqlx::Error> = sqlx::query_as::<_, RcaInvestigation>(
+        "SELECT * FROM rca_investigations WHERE id = ?1"
+    )
+    .bind(&id)
+    .fetch_one(&*pool)
+    .await;
+
+    let investigation = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(investigation)
+}
+
+#[tauri::command]
+pub async fn get_investigations(
+    pool: State<'_, SqlitePool>,
+    equipment_id: String,
+) -> Result<Vec<RcaInvestigation>, String>{
+      let result: Result<Vec<RcaInvestigation>, sqlx::Error> = sqlx::query_as::<_, RcaInvestigation>(
+        "SELECT * FROM rca_investigations WHERE equipment_id = ?1 ORDER BY created_at DESC"
+    )
+    .bind(&equipment_id)
+    .fetch_all(&*pool)
+    .await;
+
+    let investigation = result.map_err(|e: sqlx::Error| e.to_string())?;
+
+    Ok(investigation) 
+}
+
+#[tauri::command]
+pub async fn add_rca_node(
+    pool: State<'_, SqlitePool>,
+    payload: AddRcaNodePayload,
+) -> Result<RcaNode, String> {
+    let id = Uuid::new_v4().to_string();
+
+    sqlx::query(
+        "INSERT INTO rca_nodes (id, investigation_id, parent_id, node_type,gate_type, title, description)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+    )
+    .bind(&id)
+    .bind(&payload.investigation_id)
+    .bind(&payload.parent_id)
+    .bind(&payload.node_type)
+    .bind(&payload.gate_type)
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<RcaNode, sqlx::Error> = sqlx::query_as::<_, RcaNode>(
+        "SELECT * FROM rca_nodes WHERE id = ?1"
+    )
+    .bind(&id)
+    .fetch_one(&*pool)
+    .await;
+
+    let node = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(node)
+}
+    
+#[tauri::command]
+pub async fn get_investigation_nodes(
+    pool: State<'_, SqlitePool>,
+    investigation_id: String,
+) -> Result<Vec<RcaNode>, String>{
+    let result: Result<Vec<RcaNode>, sqlx::Error> = sqlx::query_as::<_, RcaNode>(
+        "SELECT * FROM rca_nodes WHERE investigation_id = ?1 ORDER BY created_at ASC"
+    )
+    .bind(&investigation_id)
+    .fetch_all(&*pool)
+    .await;
+
+    let node = result.map_err(|e: sqlx::Error| e.to_string())?;
+
+    Ok(node) 
 }

@@ -30,3 +30,28 @@ pub struct Downtime {
     pub reported_by: Option<String>,
     pub created_at: Option<String>,
 }
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct RcaInvestigation {
+    pub id: String,
+    pub downtime_id: Option<String>,
+    pub equipment_id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<String>,
+    pub created_by: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct RcaNode {
+    pub id: String,
+    pub investigation_id: String,
+    pub parent_id: Option<String>,
+    pub node_type: Option<String>,
+    pub gate_type: Option<String>,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub created_at: Option<String>,
+}
