@@ -7,6 +7,7 @@ use crate::models::{Equipment, Downtime};
 
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateEquipmentPayload {
     pub tag_number : String,
     pub name : String,
@@ -89,6 +90,7 @@ pub async fn get_equipment(
 
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateEquipmentPayload {
     pub id: String,
     pub tag_number: Option<String>,
@@ -158,6 +160,7 @@ pub async fn delete_equipment(
 
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateDowntimePayload{
     pub equipment_id : String,
     pub title : String,

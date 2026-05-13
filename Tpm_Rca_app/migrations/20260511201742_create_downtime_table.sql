@@ -9,4 +9,4 @@ CREATE TABLE downtime (
     duration_minutes INTEGER,
     reported_by TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);-- Add migration script here
+);
