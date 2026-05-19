@@ -1,6 +1,7 @@
 import { useState } from "react";
 import EquipmentPage from "./pages/EquipmentPage";
 import DowntimePage from "./pages/DowntimePage";
+import RcaPage from "./pages/RcaPage";
 
 function App() {
   const [activePage, setActivePage] = useState("equipment");
@@ -21,10 +22,17 @@ function App() {
         >
           Downtime
         </button>
+        <button
+          onClick={() => setActivePage("rca")}
+          className={`px-3 py-1 rounded ${activePage === "rca" ? "bg-slate-600" : "hover:bg-slate-700"}`}
+        >
+          RCA
+        </button>
       </nav>
       <main className="p-6">
         {activePage === "equipment" && <EquipmentPage />}
         {activePage === "downtime" && <DowntimePage />}
+        {activePage === "rca" && <RcaPage />}
       </main>
     </div>
   );

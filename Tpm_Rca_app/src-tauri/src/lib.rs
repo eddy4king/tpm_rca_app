@@ -12,7 +12,15 @@ use commands::{
     create_investigation,
     get_investigation_nodes,
     get_investigations,
-    add_rca_node};
+    add_rca_node,
+    update_downtime,
+    delete_downtime,
+    update_investigation,
+    delete_investigation,
+    delete_rca_node,
+    update_node_position,
+    get_all_downtime,
+};
 
 
 
@@ -60,7 +68,14 @@ pub fn run() {
             create_investigation,
             get_investigation_nodes,
             get_investigations,
-            add_rca_node])
+            add_rca_node,
+            update_downtime,
+            delete_downtime,
+            update_investigation,
+            delete_investigation,
+            delete_rca_node,
+            update_node_position,
+            get_all_downtime])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

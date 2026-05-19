@@ -329,8 +329,8 @@ pub async fn add_rca_node(
     let id = Uuid::new_v4().to_string();
 
     sqlx::query(
-        "INSERT INTO rca_nodes (id, investigation_id, parent_id, node_type,gate_type, title, description)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+        "INSERT INTO rca_nodes (id, investigation_id, parent_id, node_type,gate_type, title, description, x_pos, y_pos)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
     )
     .bind(&id)
     .bind(&payload.investigation_id)
@@ -339,6 +339,8 @@ pub async fn add_rca_node(
     .bind(&payload.gate_type)
     .bind(&payload.title)
     .bind(&payload.description)
+    .bind(0.0_f64)
+    .bind(0.0_f64)
     .execute(&*pool)
     .await
     .map_err(|e| e.to_string())?;
@@ -369,4 +371,163 @@ pub async fn get_investigation_nodes(
     let node = result.map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(node) 
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateDowntimePayload {
+    pub id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub loss_category: Option<String>,
+    pub start_time: Option<String>,
+    pub reported_by: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInvestigationPayload {
+    pub id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<String>,
+}
+
+#[tauri::command]
+pub async fn update_downtime(
+    pool: State<'_, SqlitePool>,
+    payload: UpdateDowntimePayload,
+) -> Result<Downtime, String> {
+    sqlx::query(
+        "UPDATE downtime SET
+            title = COALESCE(?1, title),
+            description = COALESCE(?2, description),
+            loss_category = COALESCE(?3, loss_category),
+            start_time = COALESCE(?4, start_time),
+            reported_by = COALESCE(?5, reported_by)
+         WHERE id = ?6"
+    )
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .bind(&payload.loss_category)
+    .bind(&payload.start_time)
+    .bind(&payload.reported_by)
+    .bind(&payload.id)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<Downtime, sqlx::Error> = sqlx::query_as::<_, Downtime>(
+        "SELECT * FROM downtime WHERE id = ?1"
+    )
+    .bind(&payload.id)
+    .fetch_one(&*pool)
+    .await;
+
+    let downtime = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(downtime)
+}
+
+#[tauri::command]
+pub async fn delete_downtime(
+    pool: State<'_, SqlitePool>,
+    id: String,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM downtime WHERE id = ?1")
+        .bind(&id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn update_investigation(
+    pool: State<'_, SqlitePool>,
+    payload: UpdateInvestigationPayload,
+) -> Result<RcaInvestigation, String> {
+    sqlx::query(
+        "UPDATE rca_investigations SET
+            title = COALESCE(?1, title),
+            description = COALESCE(?2, description),
+            status = COALESCE(?3, status),
+            updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?4"
+    )
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .bind(&payload.status)
+    .bind(&payload.id)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<RcaInvestigation, sqlx::Error> = sqlx::query_as::<_, RcaInvestigation>(
+        "SELECT * FROM rca_investigations WHERE id = ?1"
+    )
+    .bind(&payload.id)
+    .fetch_one(&*pool)
+    .await;
+
+    let investigation = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(investigation)
+}
+
+#[tauri::command]
+pub async fn delete_investigation(
+    pool: State<'_, SqlitePool>,
+    id: String,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM rca_investigations WHERE id = ?1")
+        .bind(&id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_rca_node(
+    pool: State<'_, SqlitePool>,
+    id: String,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM rca_nodes WHERE id = ?1")
+        .bind(&id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn update_node_position(
+    pool: State<'_, SqlitePool>,
+    id: String,
+    x_pos: f64,
+    y_pos: f64,
+) -> Result<(), String> {
+    sqlx::query(
+        "UPDATE rca_nodes SET x_pos = ?1, y_pos = ?2 WHERE id = ?3"
+    )
+    .bind(x_pos)
+    .bind(y_pos)
+    .bind(&id)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_all_downtime(
+    pool: State<'_, SqlitePool>,
+) -> Result<Vec<Downtime>, String> {
+    let result: Result<Vec<Downtime>, sqlx::Error> = sqlx::query_as::<_, Downtime>(
+        "SELECT * FROM downtime ORDER BY created_at DESC"
+    )
+    .fetch_all(&*pool)
+    .await;
+
+    let downtime = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(downtime)
 }

@@ -54,4 +54,6 @@ pub struct RcaNode {
     pub title: Option<String>,
     pub description: Option<String>,
     pub created_at: Option<String>,
+    pub x_pos: f64,
+    pub y_pos: f64,
 }
