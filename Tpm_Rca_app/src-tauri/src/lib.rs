@@ -20,6 +20,7 @@ use commands::{
     delete_rca_node,
     update_node_position,
     get_all_downtime,
+    update_rca_node,
 };
 
 
@@ -75,7 +76,8 @@ pub fn run() {
             delete_investigation,
             delete_rca_node,
             update_node_position,
-            get_all_downtime])
+            get_all_downtime,
+            update_rca_node])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

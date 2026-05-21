@@ -531,3 +531,46 @@ pub async fn get_all_downtime(
     let downtime = result.map_err(|e: sqlx::Error| e.to_string())?;
     Ok(downtime)
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRcaNodePayload {
+    pub id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub node_type: Option<String>,
+    pub gate_type: Option<String>,
+}
+
+#[tauri::command]
+pub async fn update_rca_node(
+    pool: State<'_, SqlitePool>,
+    payload: UpdateRcaNodePayload,
+) -> Result<RcaNode, String> {
+    sqlx::query(
+        "UPDATE rca_nodes SET
+            title = COALESCE(?1, title),
+            description = COALESCE(?2, description),
+            node_type = COALESCE(?3, node_type),
+            gate_type = COALESCE(?4, gate_type)
+         WHERE id = ?5"
+    )
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .bind(&payload.node_type)
+    .bind(&payload.gate_type)
+    .bind(&payload.id)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<RcaNode, sqlx::Error> = sqlx::query_as::<_, RcaNode>(
+        "SELECT * FROM rca_nodes WHERE id = ?1"
+    )
+    .bind(&payload.id)
+    .fetch_one(&*pool)
+    .await;
+
+    let node = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(node)
+}
