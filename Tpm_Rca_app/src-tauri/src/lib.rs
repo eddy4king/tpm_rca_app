@@ -25,8 +25,7 @@ use commands::{
     get_investigation_capas,
     update_capa,
     delete_capa,
-    get_downtime_in_range,
-    get_equipment_rca_summary
+    get_all_capas
 };
 
 
@@ -88,8 +87,7 @@ pub fn run() {
             get_investigation_capas,
             update_capa,
             delete_capa,
-            get_downtime_in_range,
-            get_equipment_rca_summary])
+            get_all_capas])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

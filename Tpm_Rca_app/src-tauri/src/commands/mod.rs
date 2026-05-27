@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::SqlitePool;
 use tauri::State;
 use uuid::Uuid;
@@ -703,58 +703,17 @@ pub async fn delete_capa(
     Ok(())
 }
 
+
 #[tauri::command]
-pub async fn get_downtime_in_range(
+pub async fn get_all_capas(
     pool: State<'_, SqlitePool>,
-    start_date: String,
-    end_date: String,
-) -> Result<Vec<Downtime>, String> {
-    let result: Result<Vec<Downtime>, sqlx::Error> = sqlx::query_as::<_, Downtime>(
-        "SELECT * FROM downtime
-         WHERE start_time >= ?1
-           AND start_time <= ?2
-         ORDER BY start_time ASC"
+) -> Result<Vec<CAPA>, String> {
+    let result: Result<Vec<CAPA>, sqlx::Error> = sqlx::query_as::<_, CAPA>(
+        "SELECT * FROM capa ORDER BY created_at DESC"
     )
-    .bind(&start_date)
-    .bind(&end_date)
     .fetch_all(&*pool)
     .await;
 
-    let downtime = result.map_err(|e: sqlx::Error| e.to_string())?;
-    Ok(downtime)
-}
-#[derive(Debug, Serialize, Clone, sqlx::FromRow)]
-pub struct EquipmentRcaSummary {
-    pub investigation_id: Option<String>,
-    pub investigation_title: Option<String>,
-    pub investigation_status: Option<String>,
-    pub open_capas: Option<i64>,
-    pub in_progress_capas: Option<i64>,
-}
-
-#[tauri::command]
-pub async fn get_equipment_rca_summary(
-    pool: State<'_, SqlitePool>,
-    equipment_id: String,
-) -> Result<Vec<EquipmentRcaSummary>, String> {
-    let rows = sqlx::query_as::<_, EquipmentRcaSummary>(
-        "SELECT
-            r.id              AS investigation_id,
-            r.title           AS investigation_title,
-            r.status          AS investigation_status,
-            SUM(CASE WHEN c.status = 'Open' THEN 1 ELSE 0 END)        AS open_capas,
-            SUM(CASE WHEN c.status = 'In Progress' THEN 1 ELSE 0 END) AS in_progress_capas
-         FROM rca_investigations r
-         LEFT JOIN capa c ON c.investigation_id = r.id
-         WHERE r.equipment_id = ?1
-           AND r.status != 'Closed'
-         GROUP BY r.id
-         ORDER BY r.created_at DESC"
-    )
-    .bind(&equipment_id)
-    .fetch_all(&*pool)
-    .await
-    .map_err(|e| e.to_string())?;
-
-    Ok(rows)
+    let capas = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(capas)
 }
