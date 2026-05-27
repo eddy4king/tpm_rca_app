@@ -57,3 +57,18 @@ pub struct RcaNode {
     pub x_pos: f64,
     pub y_pos: f64,
 }
+
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct CAPA {
+    pub id: String,
+    pub investigation_id: String,
+    pub title: String,
+    pub owner: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub priority: String,
+    pub due_date: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}

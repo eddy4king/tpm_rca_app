@@ -45,10 +45,10 @@ function getLossCategoryColor(
       return "bg-gray-100 text-gray-800";
   }
 }
-
+/*
 function isClosed(dt: Downtime) {
   return !!dt.end_time;
-}
+}*/
 
 const defaultForm = {
   equipment_id: "",

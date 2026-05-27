@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tauri::State;
 use uuid::Uuid;
-use crate::models::{Equipment, Downtime, RcaInvestigation, RcaNode};
+use crate::models::{Equipment, Downtime, RcaInvestigation, RcaNode, CAPA};
 
 
 
@@ -573,4 +573,188 @@ pub async fn update_rca_node(
 
     let node = result.map_err(|e: sqlx::Error| e.to_string())?;
     Ok(node)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCapaPayload{
+    pub investigation_id: Option<String>,
+    pub title: Option<String>,
+    pub owner: Option<String>,
+    pub description: Option<String>,
+    pub priority: Option<String>,
+    pub due_date: Option<String>
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCapaPayload{
+    pub id: String,
+    pub investigation_id: Option<String>,
+    pub title: Option<String>,
+    pub owner: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<String>,
+    pub priority: Option<String>,
+    pub due_date: Option<String>
+}
+
+//under construction
+#[tauri::command]
+pub async fn create_capa(
+    pool: State<'_, SqlitePool>,
+    payload: CreateCapaPayload,
+) -> Result<CAPA, String> {
+    let id = Uuid::new_v4().to_string();
+
+    sqlx::query(
+        "INSERT INTO capa (id, investigation_id, title, owner, description, status,priority, due_date)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+    )
+    .bind(&id)
+    .bind(&payload.investigation_id)
+    .bind(&payload.title)
+    .bind(&payload.owner)
+    .bind(&payload.description)
+    .bind("Open")
+    .bind(&payload.priority)
+    .bind(&payload.due_date)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<CAPA, sqlx::Error> = sqlx::query_as::<_, CAPA>(
+        "SELECT * FROM capa WHERE id = ?1"
+    )
+    .bind(&id)
+    .fetch_one(&*pool)
+    .await;
+
+    let capas = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(capas)
+}
+
+#[tauri::command]
+pub async fn get_investigation_capas(
+    pool: State<'_, SqlitePool>,
+    investigation_id: String,
+) -> Result<Vec<CAPA>, String>{
+    let result: Result<Vec<CAPA>, sqlx::Error> = sqlx::query_as::<_, CAPA>(
+        "SELECT * FROM capa WHERE investigation_id = ?1 ORDER BY created_at DESC"
+    )
+    .bind(&investigation_id)
+    .fetch_all(&*pool)
+    .await;
+
+    let capas = result.map_err(|e: sqlx::Error| e.to_string())?;
+
+    Ok(capas) 
+}
+
+#[tauri::command]
+pub async fn update_capa(
+    pool: State<'_, SqlitePool>,
+    payload: UpdateCapaPayload,
+) -> Result<CAPA, String> {
+    sqlx::query(
+        "UPDATE capa SET
+            investigation_id = COALESCE(?1, investigation_id),
+            title = COALESCE(?2, title),
+            owner = COALESCE(?3, owner),
+            description = COALESCE(?4, description),
+            status = COALESCE(?5, status),
+            priority = COALESCE(?6, priority),
+            due_date = COALESCE(?7, due_date)
+         WHERE id = ?8"
+    )
+    .bind(&payload.investigation_id)
+    .bind(&payload.title)
+    .bind(&payload.owner)
+    .bind(&payload.description)
+    .bind(&payload.status)
+    .bind(&payload.priority)
+    .bind(&payload.due_date)
+    .bind(&payload.id)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<CAPA, sqlx::Error> = sqlx::query_as::<_, CAPA>(
+        "SELECT * FROM capa WHERE id = ?1"
+    )
+    .bind(&payload.id)
+    .fetch_one(&*pool)
+    .await;
+
+    let capas = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(capas)
+}
+
+#[tauri::command]
+pub async fn delete_capa(
+    pool: State<'_, SqlitePool>,
+    id: String,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM capa WHERE id = ?1")
+        .bind(&id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_downtime_in_range(
+    pool: State<'_, SqlitePool>,
+    start_date: String,
+    end_date: String,
+) -> Result<Vec<Downtime>, String> {
+    let result: Result<Vec<Downtime>, sqlx::Error> = sqlx::query_as::<_, Downtime>(
+        "SELECT * FROM downtime
+         WHERE start_time >= ?1
+           AND start_time <= ?2
+         ORDER BY start_time ASC"
+    )
+    .bind(&start_date)
+    .bind(&end_date)
+    .fetch_all(&*pool)
+    .await;
+
+    let downtime = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(downtime)
+}
+#[derive(Debug, Serialize, Clone, sqlx::FromRow)]
+pub struct EquipmentRcaSummary {
+    pub investigation_id: Option<String>,
+    pub investigation_title: Option<String>,
+    pub investigation_status: Option<String>,
+    pub open_capas: Option<i64>,
+    pub in_progress_capas: Option<i64>,
+}
+
+#[tauri::command]
+pub async fn get_equipment_rca_summary(
+    pool: State<'_, SqlitePool>,
+    equipment_id: String,
+) -> Result<Vec<EquipmentRcaSummary>, String> {
+    let rows = sqlx::query_as::<_, EquipmentRcaSummary>(
+        "SELECT
+            r.id              AS investigation_id,
+            r.title           AS investigation_title,
+            r.status          AS investigation_status,
+            SUM(CASE WHEN c.status = 'Open' THEN 1 ELSE 0 END)        AS open_capas,
+            SUM(CASE WHEN c.status = 'In Progress' THEN 1 ELSE 0 END) AS in_progress_capas
+         FROM rca_investigations r
+         LEFT JOIN capa c ON c.investigation_id = r.id
+         WHERE r.equipment_id = ?1
+           AND r.status != 'Closed'
+         GROUP BY r.id
+         ORDER BY r.created_at DESC"
+    )
+    .bind(&equipment_id)
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(rows)
 }
