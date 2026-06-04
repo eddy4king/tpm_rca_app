@@ -4,8 +4,9 @@ import DowntimePage from "./pages/DowntimePage";
 import RcaPage from "./pages/RcaPage";
 import CAPAPage from "./pages/CAPAPage";
 import DashboardPage from "./pages/DashboardPage";
+import PMSchedulePage from "./pages/PMSchedulePage";
 
-type Page = "equipment" | "downtime" | "rca" | "capa"| "dashboard";
+type Page = "equipment" | "downtime" | "rca" | "capa"| "dashboard"|"pm";
 
 function App() {
   const [activePage, setActivePage] = useState<Page>("equipment");
@@ -13,7 +14,7 @@ function App() {
   // Optional: Persist last visited page
   useEffect(() => {
     const savedPage = localStorage.getItem("activePage") as Page | null;
-    if (savedPage && ["equipment", "downtime", "rca", "capa", "dashboard"].includes(savedPage)) {
+    if (savedPage && ["equipment", "downtime", "rca", "capa", "dashboard", "pm"].includes(savedPage)) {
       setActivePage(savedPage);
     }
   }, []);
@@ -27,7 +28,8 @@ function App() {
     { key: "downtime", label: "Downtime" },
     { key: "rca", label: "RCA" },
     { key: "capa", label: "CAPA" },
-    { key: "dashboard", label: "DASHBOARD"}
+    { key: "dashboard", label: "DASHBOARD"},
+    {key: "pm", label: "PMSchedule"}
   ] as const;
 
   return (
@@ -58,6 +60,7 @@ function App() {
         {activePage === "rca" && <RcaPage />}
         {activePage === "capa" && <CAPAPage />}
         {activePage === "dashboard" && <DashboardPage/>}
+        {activePage === "pm" && <PMSchedulePage/>}
       </main>
     </div>
   );

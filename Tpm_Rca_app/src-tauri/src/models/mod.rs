@@ -72,3 +72,18 @@ pub struct CAPA {
     pub created_at: String,
     pub updated_at: String,
 }
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct PmSchedule {
+    pub id: String,
+    pub equipment_id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub frequency: Option<String>,
+    pub next_due_date: Option<String>,
+    pub last_completed_at: Option<String>,
+    pub assigned_to: Option<String>,
+    pub status: Option<String>,
+    pub attachments: Option<String>,
+    pub created_at: Option<String>,
+}

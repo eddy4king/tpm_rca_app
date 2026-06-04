@@ -2,7 +2,12 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use tauri::State;
 use uuid::Uuid;
-use crate::models::{Equipment, Downtime, RcaInvestigation, RcaNode, CAPA};
+use crate::models::{Equipment,
+     Downtime,
+     RcaInvestigation,
+     RcaNode,
+     CAPA,
+     PmSchedule};
 
 
 
@@ -716,4 +721,182 @@ pub async fn get_all_capas(
 
     let capas = result.map_err(|e: sqlx::Error| e.to_string())?;
     Ok(capas)
+}
+
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePmSchedulePayload {
+    pub equipment_id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub frequency: String,
+    pub next_due_date: Option<String>,
+    pub assigned_to: Option<String>,
+    pub attachments: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePmSchedulePayload {
+    pub id: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub frequency: Option<String>,
+    pub next_due_date: Option<String>,
+    pub last_completed_at: Option<String>,
+    pub assigned_to: Option<String>,
+    pub status: Option<String>,
+    pub attachments: Option<String>,
+}
+
+#[tauri::command]
+pub async fn create_pm_schedule(
+    pool: State<'_, SqlitePool>,
+    payload: CreatePmSchedulePayload,
+) -> Result<PmSchedule, String> {
+    let id = Uuid::new_v4().to_string();
+
+    sqlx::query(
+        "INSERT INTO pm_schedule (id, equipment_id, title, description, frequency, next_due_date, assigned_to, status, attachments)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+    )
+    .bind(&id)
+    .bind(&payload.equipment_id)
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .bind(&payload.frequency)
+    .bind(&payload.next_due_date)
+    .bind(&payload.assigned_to)
+    .bind("Pending")
+    .bind(&payload.attachments)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<PmSchedule, sqlx::Error> = sqlx::query_as::<_, PmSchedule>(
+        "SELECT * FROM pm_schedule WHERE id = ?1"
+    )
+    .bind(&id)
+    .fetch_one(&*pool)
+    .await;
+
+    let schedule = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(schedule)
+}
+
+#[tauri::command]
+pub async fn get_equipment_pm_schedules(
+    pool: State<'_, SqlitePool>,
+    equipment_id: String,
+) -> Result<Vec<PmSchedule>, String> {
+    let result: Result<Vec<PmSchedule>, sqlx::Error> = sqlx::query_as::<_, PmSchedule>(
+        "SELECT * FROM pm_schedule WHERE equipment_id = ?1 ORDER BY next_due_date ASC"
+    )
+    .bind(&equipment_id)
+    .fetch_all(&*pool)
+    .await;
+
+    let schedules = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(schedules)
+}
+
+#[tauri::command]
+pub async fn get_all_pm_schedules(
+    pool: State<'_, SqlitePool>,
+) -> Result<Vec<PmSchedule>, String> {
+    let result: Result<Vec<PmSchedule>, sqlx::Error> = sqlx::query_as::<_, PmSchedule>(
+        "SELECT * FROM pm_schedule ORDER BY next_due_date ASC"
+    )
+    .fetch_all(&*pool)
+    .await;
+
+    let schedules = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(schedules)
+}
+
+#[tauri::command]
+pub async fn update_pm_schedule(
+    pool: State<'_, SqlitePool>,
+    payload: UpdatePmSchedulePayload,
+) -> Result<PmSchedule, String> {
+    sqlx::query(
+        "UPDATE pm_schedule SET
+            title = COALESCE(?1, title),
+            description = COALESCE(?2, description),
+            frequency = COALESCE(?3, frequency),
+            next_due_date = COALESCE(?4, next_due_date),
+            last_completed_at = COALESCE(?5, last_completed_at),
+            assigned_to = COALESCE(?6, assigned_to),
+            status = COALESCE(?7, status),
+            attachments = COALESCE(?8, attachments)
+         WHERE id = ?9"
+    )
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .bind(&payload.frequency)
+    .bind(&payload.next_due_date)
+    .bind(&payload.last_completed_at)
+    .bind(&payload.assigned_to)
+    .bind(&payload.status)
+    .bind(&payload.attachments)
+    .bind(&payload.id)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<PmSchedule, sqlx::Error> = sqlx::query_as::<_, PmSchedule>(
+        "SELECT * FROM pm_schedule WHERE id = ?1"
+    )
+    .bind(&payload.id)
+    .fetch_one(&*pool)
+    .await;
+
+    let schedule = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(schedule)
+}
+
+#[tauri::command]
+pub async fn delete_pm_schedule(
+    pool: State<'_, SqlitePool>,
+    id: String,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM pm_schedule WHERE id = ?1")
+        .bind(&id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn complete_pm_schedule(
+    pool: State<'_, SqlitePool>,
+    id: String,
+    completed_at: String,
+    next_due_date: String,
+) -> Result<PmSchedule, String> {
+    sqlx::query(
+        "UPDATE pm_schedule SET
+            status = 'Completed',
+            last_completed_at = ?1,
+            next_due_date = ?2
+         WHERE id = ?3"
+    )
+    .bind(&completed_at)
+    .bind(&next_due_date)
+    .bind(&id)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let result: Result<PmSchedule, sqlx::Error> = sqlx::query_as::<_, PmSchedule>(
+        "SELECT * FROM pm_schedule WHERE id = ?1"
+    )
+    .bind(&id)
+    .fetch_one(&*pool)
+    .await;
+
+    let schedule = result.map_err(|e: sqlx::Error| e.to_string())?;
+    Ok(schedule)
 }

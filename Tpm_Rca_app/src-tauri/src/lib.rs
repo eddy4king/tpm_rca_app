@@ -1,6 +1,7 @@
 
 use tauri::Manager;
 use commands::{
+    sync_all,
     create_equipment,
     get_all_equipment,
     get_equipment,
@@ -25,7 +26,13 @@ use commands::{
     get_investigation_capas,
     update_capa,
     delete_capa,
-    get_all_capas
+    get_all_capas,
+    create_pm_schedule,
+    get_equipment_pm_schedules,
+    get_all_pm_schedules,
+    update_pm_schedule,
+    delete_pm_schedule,
+    complete_pm_schedule
 };
 
 
@@ -87,7 +94,13 @@ pub fn run() {
             get_investigation_capas,
             update_capa,
             delete_capa,
-            get_all_capas])
+            get_all_capas,
+            create_pm_schedule,
+            get_equipment_pm_schedules,
+            get_all_pm_schedules,
+            update_pm_schedule,
+            delete_pm_schedule,
+            complete_pm_schedule, sync_all])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
