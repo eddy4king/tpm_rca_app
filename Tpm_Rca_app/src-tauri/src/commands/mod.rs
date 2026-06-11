@@ -9,6 +9,9 @@ use crate::models::{Equipment,
      CAPA,
      PmSchedule};
 
+use crate::sync::{sync_to_postgres, sync_from_postgres, get_sync_config};
+use bcrypt::{hash, verify, DEFAULT_COST};
+use crate::models::{User, Session, SafeUser};
 
 
 #[derive(Deserialize)]
@@ -899,4 +902,440 @@ pub async fn complete_pm_schedule(
 
     let schedule = result.map_err(|e: sqlx::Error| e.to_string())?;
     Ok(schedule)
+}
+
+
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSyncConfigPayload {
+    pub postgres_url: Option<String>,
+    pub auto_sync: Option<i64>,
+    pub sync_interval_minutes: Option<i64>,
+}
+
+#[tauri::command]
+pub async fn get_sync_config_cmd(
+    pool: State<'_, SqlitePool>,
+) -> Result<crate::models::SyncConfig, String> {
+    get_sync_config(&pool).await
+}
+
+#[tauri::command]
+pub async fn update_sync_config(
+    pool: State<'_, SqlitePool>,
+    payload: UpdateSyncConfigPayload,
+) -> Result<crate::models::SyncConfig, String> {
+    sqlx::query(
+        "UPDATE sync_config SET
+            postgres_url = COALESCE(?1, postgres_url),
+            auto_sync = COALESCE(?2, auto_sync),
+            sync_interval_minutes = COALESCE(?3, sync_interval_minutes)
+         WHERE id = 'default'"
+    )
+    .bind(&payload.postgres_url)
+    .bind(&payload.auto_sync)
+    .bind(&payload.sync_interval_minutes)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    get_sync_config(&pool).await
+}
+
+#[tauri::command]
+pub async fn push_to_postgres(
+    pool: State<'_, SqlitePool>,
+) -> Result<String, String> {
+    sync_to_postgres(&pool).await
+}
+
+#[tauri::command]
+pub async fn pull_from_postgres(
+    pool: State<'_, SqlitePool>,
+) -> Result<String, String> {
+    sync_from_postgres(&pool).await
+}
+
+#[tauri::command]
+pub async fn test_postgres_connection(
+    postgres_url: String,
+) -> Result<String, String> {
+    let pg_pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&postgres_url)
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+    sqlx::query("SELECT 1")
+        .execute(&pg_pool)
+        .await
+        .map_err(|e| format!("Query failed: {}", e))?;
+
+    Ok("Connection successful".to_string())
+}
+
+#[tauri::command]
+pub async fn get_sync_logs(
+    pool: State<'_, SqlitePool>,
+) -> Result<Vec<crate::models::SyncLog>, String> {
+    let result = sqlx::query_as::<_, crate::models::SyncLog>(
+        "SELECT * FROM sync_log ORDER BY created_at DESC LIMIT 100"
+    )
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterPayload {
+    pub username: String,
+    pub email: String,
+    pub password: String,
+    pub role: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoginPayload {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateUserPayload {
+    pub id: String,
+    pub username: Option<String>,
+    pub email: Option<String>,
+    pub role: Option<String>,
+    pub is_active: Option<i64>,
+}
+
+#[tauri::command]
+pub async fn register_user(
+    pool: State<'_, SqlitePool>,
+    payload: RegisterPayload,
+) -> Result<SafeUser, String> {
+    let id = Uuid::new_v4().to_string();
+    let password_hash = hash(&payload.password, DEFAULT_COST)
+        .map_err(|e| e.to_string())?;
+    let role = payload.role.unwrap_or_else(|| "Viewer".to_string());
+
+    sqlx::query(
+        "INSERT INTO users (id, username, email, password_hash, role, is_active)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1)"
+    )
+    .bind(&id)
+    .bind(&payload.username)
+    .bind(&payload.email)
+    .bind(&password_hash)
+    .bind(&role)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE id = ?1"
+    )
+    .bind(&id)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(SafeUser {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        is_active: user.is_active,
+        created_at: user.created_at,
+        last_login_at: user.last_login_at,
+    })
+}
+
+#[tauri::command]
+pub async fn login_user(
+    pool: State<'_, SqlitePool>,
+    payload: LoginPayload,
+) -> Result<(SafeUser, String), String> {
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE username = ?1 AND is_active = 1"
+    )
+    .bind(&payload.username)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|_| "Invalid username or password".to_string())?;
+
+    let valid = verify(&payload.password, &user.password_hash)
+        .map_err(|e| e.to_string())?;
+
+    if !valid {
+        return Err("Invalid username or password".to_string());
+    }
+
+    // Create session token
+    let session_id = Uuid::new_v4().to_string();
+    let token = Uuid::new_v4().to_string();
+    let expires_at = chrono::Utc::now()
+        .checked_add_signed(chrono::Duration::days(7))
+        .unwrap()
+        .to_rfc3339();
+
+    sqlx::query(
+        "INSERT INTO sessions (id, user_id, token, expires_at)
+         VALUES (?1, ?2, ?3, ?4)"
+    )
+    .bind(&session_id)
+    .bind(&user.id)
+    .bind(&token)
+    .bind(&expires_at)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Update last login
+    sqlx::query("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?1")
+        .bind(&user.id)
+        .execute(&*pool)
+        .await
+        .ok();
+
+    let safe_user = SafeUser {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        is_active: user.is_active,
+        created_at: user.created_at,
+        last_login_at: user.last_login_at,
+    };
+
+    Ok((safe_user, token))
+}
+
+#[tauri::command]
+pub async fn logout_user(
+    pool: State<'_, SqlitePool>,
+    token: String,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM sessions WHERE token = ?1")
+        .bind(&token)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn validate_session(
+    pool: State<'_, SqlitePool>,
+    token: String,
+) -> Result<SafeUser, String> {
+    let session = sqlx::query_as::<_, Session>(
+        "SELECT * FROM sessions WHERE token = ?1"
+    )
+    .bind(&token)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|_| "Invalid or expired session".to_string())?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    if session.expires_at < now {
+        sqlx::query("DELETE FROM sessions WHERE token = ?1")
+            .bind(&token)
+            .execute(&*pool)
+            .await
+            .ok();
+        return Err("Session expired".to_string());
+    }
+
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE id = ?1 AND is_active = 1"
+    )
+    .bind(&session.user_id)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|_| "User not found".to_string())?;
+
+    Ok(SafeUser {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        is_active: user.is_active,
+        created_at: user.created_at,
+        last_login_at: user.last_login_at,
+    })
+}
+
+#[tauri::command]
+pub async fn get_all_users(
+    pool: State<'_, SqlitePool>,
+) -> Result<Vec<SafeUser>, String> {
+    let users = sqlx::query_as::<_, User>(
+        "SELECT * FROM users ORDER BY created_at DESC"
+    )
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(users.into_iter().map(|u| SafeUser {
+        id: u.id,
+        username: u.username,
+        email: u.email,
+        role: u.role,
+        is_active: u.is_active,
+        created_at: u.created_at,
+        last_login_at: u.last_login_at,
+    }).collect())
+}
+
+#[tauri::command]
+pub async fn update_user(
+    pool: State<'_, SqlitePool>,
+    payload: UpdateUserPayload,
+) -> Result<SafeUser, String> {
+    sqlx::query(
+        "UPDATE users SET
+            username = COALESCE(?1, username),
+            email = COALESCE(?2, email),
+            role = COALESCE(?3, role),
+            is_active = COALESCE(?4, is_active)
+         WHERE id = ?5"
+    )
+    .bind(&payload.username)
+    .bind(&payload.email)
+    .bind(&payload.role)
+    .bind(&payload.is_active)
+    .bind(&payload.id)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE id = ?1"
+    )
+    .bind(&payload.id)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(SafeUser {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        is_active: user.is_active,
+        created_at: user.created_at,
+        last_login_at: user.last_login_at,
+    })
+}
+
+#[tauri::command]
+pub async fn delete_user(
+    pool: State<'_, SqlitePool>,
+    id: String,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM users WHERE id = ?1")
+        .bind(&id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn setup_admin(
+    pool: State<'_, SqlitePool>,
+    username: String,
+    email: String,
+    password: String,
+) -> Result<SafeUser, String> {
+    // Only works if no users exist yet
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if count > 0 {
+        return Err("Setup already complete. Use login instead.".to_string());
+    }
+
+    let id = Uuid::new_v4().to_string();
+    let password_hash = hash(&password, DEFAULT_COST)
+        .map_err(|e| e.to_string())?;
+
+    sqlx::query(
+        "INSERT INTO users (id, username, email, password_hash, role, is_active)
+         VALUES (?1, ?2, ?3, ?4, 'Admin', 1)"
+    )
+    .bind(&id)
+    .bind(&username)
+    .bind(&email)
+    .bind(&password_hash)
+    .execute(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(SafeUser {
+        id,
+        username,
+        email,
+        role: "Admin".to_string(),
+        is_active: 1,
+        created_at: None,
+        last_login_at: None,
+    })
+}
+
+#[tauri::command]
+pub async fn has_users(
+    pool: State<'_, SqlitePool>,
+) -> Result<bool, String> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(count > 0)
+}
+
+#[tauri::command]
+pub async fn get_users_debug(
+    pool: State<'_, SqlitePool>,
+) -> Result<Vec<String>, String> {
+    let users = sqlx::query_as::<_, User>(
+        "SELECT * FROM users"
+    )
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(users.iter().map(|u| format!("{}|{}|{}|{}", u.username, u.email, u.role, u.is_active)).collect())
+}
+
+#[tauri::command]
+pub async fn reset_users(
+    pool: State<'_, SqlitePool>,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM users WHERE username = '__check__'")
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clear_all_sessions(
+    pool: State<'_, SqlitePool>,
+) -> Result<(), String> {
+    sqlx::query("DELETE FROM sessions")
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }

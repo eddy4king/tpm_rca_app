@@ -87,3 +87,58 @@ pub struct PmSchedule {
     pub attachments: Option<String>,
     pub created_at: Option<String>,
 }
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct SyncConfig {
+    pub id: String,
+    pub postgres_url: Option<String>,
+    pub auto_sync: i64,
+    pub sync_interval_minutes: i64,
+    pub last_synced_at: Option<String>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct SyncLog {
+    pub id: String,
+    pub table_name: String,
+    pub record_id: String,
+    pub operation: String,
+    pub payload: String,
+    pub synced: i64,
+    pub error: Option<String>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct User {
+    pub id: String,
+    pub username: String,
+    pub email: String,
+    pub password_hash: String,
+    pub role: String,
+    pub is_active: i64,
+    pub created_at: Option<String>,
+    pub last_login_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct Session {
+    pub id: String,
+    pub user_id: String,
+    pub token: String,
+    pub expires_at: String,
+    pub created_at: Option<String>,
+}
+
+// Safe user struct — never exposes password_hash to frontend
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SafeUser {
+    pub id: String,
+    pub username: String,
+    pub email: String,
+    pub role: String,
+    pub is_active: i64,
+    pub created_at: Option<String>,
+    pub last_login_at: Option<String>,
+}

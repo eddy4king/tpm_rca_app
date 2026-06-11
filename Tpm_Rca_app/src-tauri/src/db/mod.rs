@@ -1,6 +1,5 @@
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
-
 pub async fn init() -> SqlitePool {
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
@@ -11,8 +10,13 @@ pub async fn init() -> SqlitePool {
         .await
         .expect("Failed to connect to database");
     println!("Database connected successfully!");
+
+    // Run migrations on startup
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .expect("Failed to run migrations");
+    println!("Migrations applied successfully!");
+
     pool
 }
-
-
-

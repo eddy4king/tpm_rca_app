@@ -1,7 +1,6 @@
 
 use tauri::Manager;
 use commands::{
-    sync_all,
     create_equipment,
     get_all_equipment,
     get_equipment,
@@ -32,7 +31,25 @@ use commands::{
     get_all_pm_schedules,
     update_pm_schedule,
     delete_pm_schedule,
-    complete_pm_schedule
+    complete_pm_schedule,
+    get_sync_config_cmd,
+    update_sync_config,
+    push_to_postgres,
+    pull_from_postgres,
+    test_postgres_connection,
+    get_sync_logs,
+    register_user,
+    login_user,
+    logout_user,
+    validate_session,
+    get_all_users,
+    update_user,
+    delete_user,
+    setup_admin,
+    has_users,
+    get_users_debug,
+    reset_users,
+    clear_all_sessions
 };
 
 
@@ -41,6 +58,7 @@ mod commands;
 mod models;
 mod db;
 mod services;
+mod policy;
 mod sync;
 mod errors;
 
@@ -59,7 +77,7 @@ pub fn run() {
         .setup(|app|  {
             dotenvy::dotenv().ok();
             let handle = app.handle().clone();
-            tauri::async_runtime::spawn(
+            tauri::async_runtime::block_on(
                 async move {
                     let pool = db::init().await;
                     handle.manage(pool);
@@ -100,7 +118,25 @@ pub fn run() {
             get_all_pm_schedules,
             update_pm_schedule,
             delete_pm_schedule,
-            complete_pm_schedule, sync_all])
+            complete_pm_schedule,
+            get_sync_config_cmd,
+            update_sync_config,
+            push_to_postgres,
+            pull_from_postgres,
+            test_postgres_connection,
+            get_sync_logs,
+            register_user,
+            login_user,
+            logout_user,
+            validate_session,
+            get_all_users,
+            update_user,
+            delete_user,
+            setup_admin,
+            has_users,
+            get_users_debug,
+            reset_users,
+            clear_all_sessions])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
