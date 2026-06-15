@@ -77,13 +77,10 @@ pub fn run() {
         .setup(|app|  {
             dotenvy::dotenv().ok();
             let handle = app.handle().clone();
-            tauri::async_runtime::block_on(
-                async move {
-                    let pool = db::init().await;
-                    handle.manage(pool);
-                }
-            );
-            Ok(())
+            let pool =  tauri::async_runtime::block_on(
+                async {db::init().await});
+                 handle.manage(pool);
+                 Ok(())
         })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![

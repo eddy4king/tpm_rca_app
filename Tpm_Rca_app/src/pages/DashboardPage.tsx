@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Activity,
-  AlertTriangle,
   CheckCircle2,
   Clock3,
   TrendingDown,
@@ -10,7 +9,7 @@ import {
   Wrench,
   BarChart3,
   ClipboardCheck,
-  Search,
+  AlertTriangle,
 } from "lucide-react";
 
 interface Equipment {
@@ -50,12 +49,6 @@ interface CAPA {
   due_date: string | null;
 }
 
-const priorityStyles: Record<string, string> = {
-  Critical: "bg-red-100 text-red-700",
-  High: "bg-orange-100 text-orange-700",
-  Medium: "bg-blue-100 text-blue-700",
-  Low: "bg-slate-100 text-slate-600",
-};
 
 const statusDot: Record<string, string> = {
   Running: "bg-green-500",
@@ -110,11 +103,12 @@ function BarChart({ data, label }: { data: { name: string; value: number; color:
   );
 }
 
-function DashboardPage() {
+function DashboardPage() { // Dashboard renders role‑specific widgets
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [downtime, setDowntime] = useState<Downtime[]>([]);
   const [investigations, setInvestigations] = useState<Investigation[]>([]);
-  const [capas, setCapas] = useState<CAPA[]>([]);
+  const [capas, setCapas] = useState<CAPA[]>([]); // CAPA data
+  // const [rolePermissions, setRolePermissions] = useState<string[]>([]); // removed unused permissions
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedEquipmentId, setSelectedEquipmentId] = useState("");

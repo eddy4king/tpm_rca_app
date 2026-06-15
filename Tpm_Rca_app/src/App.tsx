@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { useRole } from "./context/RoleContext";
 import EquipmentPage from "./pages/EquipmentPage";
 import DowntimePage from "./pages/DowntimePage";
 import RcaPage from "./pages/RcaPage";
@@ -15,6 +16,7 @@ type Page = "equipment" | "downtime" | "rca" | "capa" | "dashboard" | "pm" | "sy
 
 function AppInner() {
   const { user, logout, isAdmin, isLoading } = useAuth();
+  const { role, loading: roleLoading } = useRole();
   const [activePage, setActivePage] = useState<Page>("dashboard");
 
   useEffect(() => {
@@ -26,15 +28,16 @@ function AppInner() {
     localStorage.setItem("activePage", activePage);
   }, [activePage]);
 
-  if (isLoading) return (
+  if (isLoading || roleLoading) return (
     <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-      Loading...
+      Loading…
     </div>
   );
 
   if (!user) return <LoginPage />;
 
-  const navItems = [
+  // Base navigation items for all users
+  const baseNav = [
     { key: "dashboard", label: "Dashboard" },
     { key: "equipment", label: "Equipment" },
     { key: "downtime", label: "Downtime" },
@@ -42,8 +45,15 @@ function AppInner() {
     { key: "capa", label: "CAPA" },
     { key: "pm", label: "PM Scheduler" },
     { key: "sync", label: "Sync" },
-    ...(isAdmin ? [{ key: "users", label: "Users" }] : []),
   ] as const;
+
+  // Filter by role permissions if available; permission strings correspond to nav keys.
+  const permittedNav = role && role.permissions.length
+    ? baseNav.filter(item => role.permissions.includes("*") || role.permissions.includes(item.key))
+    : baseNav;
+
+  // Admins keep the Users page regardless of permissions.
+  const navItems = isAdmin ? [...permittedNav, { key: "users", label: "Users" }] : permittedNav;
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
@@ -97,10 +107,14 @@ function AppInner() {
   );
 }
 
+import { RoleProvider } from "./context/RoleContext";
+
 function App() {
   return (
     <AuthProvider>
-      <AppInner />
+      <RoleProvider>
+        <AppInner />
+      </RoleProvider>
     </AuthProvider>
   );
 }

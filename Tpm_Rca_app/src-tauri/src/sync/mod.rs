@@ -193,8 +193,8 @@ async fn ensure_pg_tables(pg_pool: &sqlx::PgPool) -> Result<(), String> {
     for table_sql in tables {
         sqlx::query(table_sql)
             .execute(pg_pool)
-            .await
-            .map_err(|e| e.to_string())?;
+        .await
+        .map_err(|e: sqlx::Error| e.to_string())?;
     }
     Ok(())
 }

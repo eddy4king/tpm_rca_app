@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Plus, Wrench, Calendar, User, Clock3, CheckCircle2,
-  AlertTriangle, Pencil, Trash2, Search, Paperclip, X,
+  Pencil, Trash2, Search, Paperclip, X,
 } from "lucide-react";
 
 interface Equipment {

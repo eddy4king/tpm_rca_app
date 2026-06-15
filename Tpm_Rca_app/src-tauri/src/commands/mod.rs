@@ -2,16 +2,14 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use tauri::State;
 use uuid::Uuid;
-use crate::models::{Equipment,
-     Downtime,
-     RcaInvestigation,
-     RcaNode,
-     CAPA,
-     PmSchedule};
+use crate::models::{Equipment, Downtime, RcaInvestigation, RcaNode, CAPA, PmSchedule};
+
 
 use crate::sync::{sync_to_postgres, sync_from_postgres, get_sync_config};
 use bcrypt::{hash, verify, DEFAULT_COST};
-use crate::models::{User, Session, SafeUser};
+use crate::models::SafeUser;
+use crate::models::User;
+use crate::models::Session;
 
 
 #[derive(Deserialize)]
@@ -51,7 +49,7 @@ pub async fn create_equipment(
     .bind(&payload.parent_id)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let equipment = sqlx::query_as::<_, Equipment>(
         "SELECT * FROM equipment WHERE id = ?1"
@@ -59,7 +57,7 @@ pub async fn create_equipment(
     .bind(&id)
     .fetch_one(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(equipment)
 }
@@ -75,7 +73,7 @@ pub async fn get_all_equipment(
     )
     .fetch_all(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(equipment)
     
@@ -91,7 +89,7 @@ pub async fn get_equipment(
     ).bind(&id)
     .fetch_one(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(equipment)
 }
@@ -138,7 +136,7 @@ pub async fn update_equipment (
     .bind(&payload.id)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let equipment = sqlx::query_as::<_, Equipment>(
         "SELECT * FROM equipment WHERE id =?1"
@@ -146,7 +144,7 @@ pub async fn update_equipment (
     .bind(&payload.id)
     .fetch_one(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(equipment)
 
@@ -162,7 +160,7 @@ pub async fn delete_equipment(
         ).bind(&id)
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
 
@@ -198,7 +196,7 @@ pub async fn create_downtime(
     .bind(&payload.reported_by)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<Downtime, sqlx::Error>= sqlx::query_as::<_, Downtime>(
         "SELECT * FROM downtime WHERE id = ?1"
@@ -243,7 +241,7 @@ pub async fn close_downtime(
         .bind(&id)
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result :Result<Downtime, sqlx::Error>= sqlx::query_as::<_, Downtime>(
         "SELECT * FROM downtime WHERE id = ?1"
@@ -299,7 +297,7 @@ pub async fn create_investigation(
     .bind(&payload.created_by)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<RcaInvestigation, sqlx::Error> = sqlx::query_as::<_, RcaInvestigation>(
         "SELECT * FROM rca_investigations WHERE id = ?1"
@@ -351,7 +349,7 @@ pub async fn add_rca_node(
     .bind(0.0_f64)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<RcaNode, sqlx::Error> = sqlx::query_as::<_, RcaNode>(
         "SELECT * FROM rca_nodes WHERE id = ?1"
@@ -423,7 +421,7 @@ pub async fn update_downtime(
     .bind(&payload.id)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<Downtime, sqlx::Error> = sqlx::query_as::<_, Downtime>(
         "SELECT * FROM downtime WHERE id = ?1"
@@ -445,7 +443,7 @@ pub async fn delete_downtime(
         .bind(&id)
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
 
@@ -468,7 +466,7 @@ pub async fn update_investigation(
     .bind(&payload.id)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<RcaInvestigation, sqlx::Error> = sqlx::query_as::<_, RcaInvestigation>(
         "SELECT * FROM rca_investigations WHERE id = ?1"
@@ -490,7 +488,7 @@ pub async fn delete_investigation(
         .bind(&id)
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
 
@@ -503,7 +501,7 @@ pub async fn delete_rca_node(
         .bind(&id)
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
 
@@ -522,7 +520,7 @@ pub async fn update_node_position(
     .bind(&id)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
 
@@ -570,7 +568,7 @@ pub async fn update_rca_node(
     .bind(&payload.id)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<RcaNode, sqlx::Error> = sqlx::query_as::<_, RcaNode>(
         "SELECT * FROM rca_nodes WHERE id = ?1"
@@ -629,7 +627,7 @@ pub async fn create_capa(
     .bind(&payload.due_date)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<CAPA, sqlx::Error> = sqlx::query_as::<_, CAPA>(
         "SELECT * FROM capa WHERE id = ?1"
@@ -685,7 +683,7 @@ pub async fn update_capa(
     .bind(&payload.id)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<CAPA, sqlx::Error> = sqlx::query_as::<_, CAPA>(
         "SELECT * FROM capa WHERE id = ?1"
@@ -707,7 +705,7 @@ pub async fn delete_capa(
         .bind(&id)
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
 
@@ -775,7 +773,7 @@ pub async fn create_pm_schedule(
     .bind(&payload.attachments)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<PmSchedule, sqlx::Error> = sqlx::query_as::<_, PmSchedule>(
         "SELECT * FROM pm_schedule WHERE id = ?1"
@@ -846,7 +844,7 @@ pub async fn update_pm_schedule(
     .bind(&payload.id)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<PmSchedule, sqlx::Error> = sqlx::query_as::<_, PmSchedule>(
         "SELECT * FROM pm_schedule WHERE id = ?1"
@@ -868,7 +866,7 @@ pub async fn delete_pm_schedule(
         .bind(&id)
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
 
@@ -891,7 +889,7 @@ pub async fn complete_pm_schedule(
     .bind(&id)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let result: Result<PmSchedule, sqlx::Error> = sqlx::query_as::<_, PmSchedule>(
         "SELECT * FROM pm_schedule WHERE id = ?1"
@@ -938,7 +936,7 @@ pub async fn update_sync_config(
     .bind(&payload.sync_interval_minutes)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     get_sync_config(&pool).await
 }
@@ -965,7 +963,7 @@ pub async fn test_postgres_connection(
         .max_connections(1)
         .connect(&postgres_url)
         .await
-        .map_err(|e| format!("Connection failed: {}", e))?;
+        .map_err(|e: sqlx::Error| format!("Connection failed: {}", e))?;
 
     sqlx::query("SELECT 1")
         .execute(&pg_pool)
@@ -984,7 +982,7 @@ pub async fn get_sync_logs(
     )
     .fetch_all(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(result)
 }
 
@@ -1037,7 +1035,7 @@ pub async fn register_user(
     .bind(&role)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let user = sqlx::query_as::<_, User>(
         "SELECT * FROM users WHERE id = ?1"
@@ -1045,7 +1043,7 @@ pub async fn register_user(
     .bind(&id)
     .fetch_one(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(SafeUser {
         id: user.id,
@@ -1096,7 +1094,7 @@ pub async fn login_user(
     .bind(&expires_at)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     // Update last login
     sqlx::query("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?1")
@@ -1127,7 +1125,7 @@ pub async fn logout_user(
         .bind(&token)
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
 
@@ -1182,7 +1180,7 @@ pub async fn get_all_users(
     )
     .fetch_all(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(users.into_iter().map(|u| SafeUser {
         id: u.id,
@@ -1215,7 +1213,7 @@ pub async fn update_user(
     .bind(&payload.id)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     let user = sqlx::query_as::<_, User>(
         "SELECT * FROM users WHERE id = ?1"
@@ -1223,7 +1221,7 @@ pub async fn update_user(
     .bind(&payload.id)
     .fetch_one(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(SafeUser {
         id: user.id,
@@ -1245,7 +1243,7 @@ pub async fn delete_user(
         .bind(&id)
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
 
@@ -1260,7 +1258,7 @@ pub async fn setup_admin(
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
 
     if count > 0 {
         return Err("Setup already complete. Use login instead.".to_string());
@@ -1280,7 +1278,7 @@ pub async fn setup_admin(
     .bind(&password_hash)
     .execute(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(SafeUser {
         id,
@@ -1300,7 +1298,7 @@ pub async fn has_users(
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(count > 0)
 }
 
@@ -1313,7 +1311,7 @@ pub async fn get_users_debug(
     )
     .fetch_all(&*pool)
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(users.iter().map(|u| format!("{}|{}|{}|{}", u.username, u.email, u.role, u.is_active)).collect())
 }
@@ -1325,7 +1323,7 @@ pub async fn reset_users(
     sqlx::query("DELETE FROM users WHERE username = '__check__'")
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
 
@@ -1336,6 +1334,6 @@ pub async fn clear_all_sessions(
     sqlx::query("DELETE FROM sessions")
         .execute(&*pool)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }

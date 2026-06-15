@@ -28,36 +28,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem("session_token");
-    if (savedToken) {
-      validateSession(savedToken);
-    } else {
-      setIsLoading(false);
-    }
-  }, []);
+  const savedToken = localStorage.getItem("session_token");
+  if (savedToken) {
+    // Small delay to ensure Tauri backend is ready
+    setTimeout(() => validateSession(savedToken), 500);
+  } else {
+    setIsLoading(false);
+  }
+}, []);
 
   async function validateSession(savedToken: string) {
-        try {
-            const validUser = await invoke<SafeUser>("validate_session", { token: savedToken });
-            setUser(validUser);
-            setToken(savedToken);
-        } catch {
-            // Clear invalid token and all sessions from DB
-            localStorage.removeItem("session_token");
-            await invoke("logout_user", { token: savedToken }).catch(() => {});
-        } finally {
-            setIsLoading(false);
-        }
-        }
+    try {
+      const validUser = await invoke<SafeUser>("validate_session", { token: savedToken });
+      setUser(validUser);
+      setToken(savedToken);
+    } catch {
+      localStorage.removeItem("session_token");
+      await invoke("logout_user", { token: savedToken }).catch(() => {});
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   async function login(username: string, password: string) {
+  try {
     const [loggedInUser, sessionToken] = await invoke<[SafeUser, string]>("login_user", {
       payload: { username, password },
     });
     setUser(loggedInUser);
     setToken(sessionToken);
     localStorage.setItem("session_token", sessionToken);
+  } catch (err) {
+    throw new Error(String(err));
   }
+}
+
 
   async function logout() {
     if (token) {
@@ -70,7 +75,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, token, login, logout,
+      user,
+      token,
+      login,
+      logout,
       isAdmin: user?.role === "Admin",
       isLoading,
     }}>

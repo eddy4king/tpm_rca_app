@@ -1,7 +1,10 @@
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 pub async fn init() -> SqlitePool {
-    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    dotenvy::dotenv().ok();
+    
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "sqlite:C:/Users/edosa/project/tpm_rca.db".to_string());
 
     println!("Connecting to :{}", database_url);
     let pool = SqlitePoolOptions::new()
@@ -11,7 +14,6 @@ pub async fn init() -> SqlitePool {
         .expect("Failed to connect to database");
     println!("Database connected successfully!");
 
-    // Run migrations on startup
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
