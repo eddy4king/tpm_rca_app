@@ -10,6 +10,12 @@ use bcrypt::{hash, verify, DEFAULT_COST};
 use crate::models::SafeUser;
 use crate::models::User;
 use crate::models::Session;
+use crate::commands::audit::record_audit;
+pub mod role;
+pub mod audit;
+pub mod hierarchy;
+pub mod timeline;
+pub mod backup;
 
 
 #[derive(Deserialize)]
@@ -22,7 +28,8 @@ pub struct CreateEquipmentPayload {
     pub criticality : String,
     pub status : String,
     pub equipment_type : String,
-    pub parent_id : Option<String>
+    pub parent_id : Option<String>,
+    pub area_id : Option<String>
 }
 
 
@@ -35,8 +42,8 @@ pub async fn create_equipment(
     let id = Uuid::new_v4().to_string();
 
    sqlx::query(
-        "INSERT INTO equipment (id, tag_number, name, description, location, criticality, status, equipment_type, parent_id)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        "INSERT INTO equipment (id, tag_number, name, description, location, criticality, status, equipment_type, parent_id, area_id)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
     )
     .bind(&id)
     .bind(&payload.tag_number)
@@ -47,9 +54,13 @@ pub async fn create_equipment(
     .bind(&payload.status)
     .bind(&payload.equipment_type)
     .bind(&payload.parent_id)
+    .bind(&payload.area_id)
     .execute(&*pool)
     .await
     .map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "equipment", Some(&id), "create",
+        &format!("Equipment '{}' ({}) created", payload.name, payload.tag_number), None).await.ok();
 
     let equipment = sqlx::query_as::<_, Equipment>(
         "SELECT * FROM equipment WHERE id = ?1"
@@ -76,8 +87,36 @@ pub async fn get_all_equipment(
     .map_err(|e: sqlx::Error| e.to_string())?;
 
     Ok(equipment)
-    
 }
+
+#[tauri::command]
+pub async fn get_oee_metrics(pool: State<'_, SqlitePool>) -> Result<serde_json::Value, String> {
+    // Planned production minutes for the last 30 days (30 days × 24 h × 60 min)
+    let planned_minutes: i64 = 30 * 24 * 60;
+
+    // Total downtime minutes from the downtime table
+    let total_downtime: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(duration_minutes), 0) FROM downtime"
+    )
+    .fetch_one(&*pool)
+    .await
+    .map_err(|e: sqlx::Error| e.to_string())?;
+
+    // Availability = (planned – downtime) / planned * 100
+    let availability = ((planned_minutes - total_downtime).max(0) as f64 / planned_minutes as f64) * 100.0;
+
+    // For MVP we set performance and quality to 100 % – can be refined later.
+    let performance: f64 = 100.0;
+    let quality: f64 = 100.0;
+
+    let result = serde_json::json!({
+        "availability": availability.round() as i64,
+        "performance": performance.round() as i64,
+        "quality": quality.round() as i64,
+    });
+    Ok(result)
+}
+
 
 #[tauri::command]
 pub async fn get_equipment(
@@ -105,7 +144,8 @@ pub struct UpdateEquipmentPayload {
     pub location : Option<String>,
     pub criticality : Option<String>,
     pub status : Option<String>,
-    pub equipment_type : Option<String>
+    pub equipment_type : Option<String>,
+    pub area_id : Option<String>
 }
 
 
@@ -123,8 +163,9 @@ pub async fn update_equipment (
             criticality = COALESCE(?5, criticality),
             status = COALESCE(?6, status),
             equipment_type = COALESCE(?7, equipment_type),
+            area_id = COALESCE(?8, area_id),
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?8"
+        WHERE id = ?9"
     )
     .bind(&payload.tag_number)
     .bind(&payload.name)
@@ -133,10 +174,14 @@ pub async fn update_equipment (
     .bind(&payload.criticality)
     .bind(&payload.status)
     .bind(&payload.equipment_type)
+    .bind(&payload.area_id)
     .bind(&payload.id)
     .execute(&*pool)
     .await
     .map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "equipment", Some(&payload.id), "update",
+        &format!("Equipment '{}' updated", payload.name.clone().unwrap_or_default()), None).await.ok();
 
     let equipment = sqlx::query_as::<_, Equipment>(
         "SELECT * FROM equipment WHERE id =?1"
@@ -161,6 +206,9 @@ pub async fn delete_equipment(
         .execute(&*pool)
         .await
         .map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "equipment", Some(&id), "delete",
+        "Equipment deleted", None).await.ok();
     Ok(())
 }
 
@@ -207,6 +255,9 @@ pub async fn create_downtime(
 
     let downtime= result.map_err(|e: sqlx::Error| e.to_string())?;
 
+    record_audit(&pool, "downtime", Some(&id), "create",
+        &format!("Downtime '{}' logged", payload.title), payload.reported_by.as_deref()).await.ok();
+
     Ok(downtime)
 }
 
@@ -251,6 +302,9 @@ pub async fn close_downtime(
     .await;
 
     let downtime = result.map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "downtime", Some(&id), "close",
+        "Downtime event closed", None).await.ok();
 
     Ok(downtime)
 }
@@ -444,6 +498,9 @@ pub async fn delete_downtime(
         .execute(&*pool)
         .await
         .map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "downtime", Some(&id), "delete",
+        "Downtime event deleted", None).await.ok();
     Ok(())
 }
 
@@ -622,12 +679,15 @@ pub async fn create_capa(
     .bind(&payload.title)
     .bind(&payload.owner)
     .bind(&payload.description)
-    .bind("Open")
-    .bind(&payload.priority)
-    .bind(&payload.due_date)
-    .execute(&*pool)
-    .await
-    .map_err(|e: sqlx::Error| e.to_string())?;
+        .bind("Open")
+        .bind(&payload.priority)
+        .bind(&payload.due_date)
+        .execute(&*pool)
+        .await
+        .map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "capa", Some(&id), "create",
+        &format!("CAPA '{}' created", payload.title.clone().unwrap_or_default()), None).await.ok();
 
     let result: Result<CAPA, sqlx::Error> = sqlx::query_as::<_, CAPA>(
         "SELECT * FROM capa WHERE id = ?1"
@@ -693,9 +753,12 @@ pub async fn update_capa(
     .await;
 
     let capas = result.map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "capa", Some(&payload.id), "update",
+        &format!("CAPA '{}' updated", payload.title.clone().unwrap_or_default()), None).await.ok();
+
     Ok(capas)
 }
-
 #[tauri::command]
 pub async fn delete_capa(
     pool: State<'_, SqlitePool>,
@@ -706,6 +769,9 @@ pub async fn delete_capa(
         .execute(&*pool)
         .await
         .map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "capa", Some(&id), "delete",
+        "CAPA deleted", None).await.ok();
     Ok(())
 }
 
@@ -735,6 +801,7 @@ pub struct CreatePmSchedulePayload {
     pub next_due_date: Option<String>,
     pub assigned_to: Option<String>,
     pub attachments: Option<String>,
+    pub priority: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -748,6 +815,7 @@ pub struct UpdatePmSchedulePayload {
     pub last_completed_at: Option<String>,
     pub assigned_to: Option<String>,
     pub status: Option<String>,
+    pub priority: Option<String>,
     pub attachments: Option<String>,
 }
 
@@ -759,8 +827,8 @@ pub async fn create_pm_schedule(
     let id = Uuid::new_v4().to_string();
 
     sqlx::query(
-        "INSERT INTO pm_schedule (id, equipment_id, title, description, frequency, next_due_date, assigned_to, status, attachments)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        "INSERT INTO pm_schedule (id, equipment_id, title, description, frequency, next_due_date, assigned_to, status, attachments, priority)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
     )
     .bind(&id)
     .bind(&payload.equipment_id)
@@ -771,9 +839,13 @@ pub async fn create_pm_schedule(
     .bind(&payload.assigned_to)
     .bind("Pending")
     .bind(&payload.attachments)
+    .bind(&payload.priority)
     .execute(&*pool)
     .await
     .map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "pm_schedule", Some(&id), "create",
+        &format!("PM task '{}' created", payload.title), payload.assigned_to.as_deref()).await.ok();
 
     let result: Result<PmSchedule, sqlx::Error> = sqlx::query_as::<_, PmSchedule>(
         "SELECT * FROM pm_schedule WHERE id = ?1"
@@ -830,8 +902,9 @@ pub async fn update_pm_schedule(
             last_completed_at = COALESCE(?5, last_completed_at),
             assigned_to = COALESCE(?6, assigned_to),
             status = COALESCE(?7, status),
-            attachments = COALESCE(?8, attachments)
-         WHERE id = ?9"
+            priority = COALESCE(?8, priority),
+            attachments = COALESCE(?9, attachments)
+         WHERE id = ?10"
     )
     .bind(&payload.title)
     .bind(&payload.description)
@@ -840,11 +913,15 @@ pub async fn update_pm_schedule(
     .bind(&payload.last_completed_at)
     .bind(&payload.assigned_to)
     .bind(&payload.status)
+    .bind(&payload.priority)
     .bind(&payload.attachments)
     .bind(&payload.id)
     .execute(&*pool)
     .await
     .map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "pm_schedule", Some(&payload.id), "update",
+        &format!("PM task '{}' updated", payload.title.clone().unwrap_or_default()), None).await.ok();
 
     let result: Result<PmSchedule, sqlx::Error> = sqlx::query_as::<_, PmSchedule>(
         "SELECT * FROM pm_schedule WHERE id = ?1"
@@ -854,6 +931,7 @@ pub async fn update_pm_schedule(
     .await;
 
     let schedule = result.map_err(|e: sqlx::Error| e.to_string())?;
+
     Ok(schedule)
 }
 
@@ -867,6 +945,9 @@ pub async fn delete_pm_schedule(
         .execute(&*pool)
         .await
         .map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "pm_schedule", Some(&id), "delete",
+        "PM task deleted", None).await.ok();
     Ok(())
 }
 
@@ -899,6 +980,10 @@ pub async fn complete_pm_schedule(
     .await;
 
     let schedule = result.map_err(|e: sqlx::Error| e.to_string())?;
+
+    record_audit(&pool, "pm_schedule", Some(&id), "complete",
+        "PM task marked complete", None).await.ok();
+
     Ok(schedule)
 }
 
@@ -1076,9 +1161,10 @@ pub async fn login_user(
         return Err("Invalid username or password".to_string());
     }
 
-    // Create session token
+    // Create a signed JWT session token (tamper-evident). It is also recorded
+    // in the sessions table so it can be revoked server-side on logout.
     let session_id = Uuid::new_v4().to_string();
-    let token = Uuid::new_v4().to_string();
+    let token = crate::services::jwt::create_jwt(&user.id, &user.role, 7)?;
     let expires_at = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::days(7))
         .unwrap()
@@ -1134,6 +1220,10 @@ pub async fn validate_session(
     pool: State<'_, SqlitePool>,
     token: String,
 ) -> Result<SafeUser, String> {
+    // 1. Verify the JWT signature and expiry (tamper-evidence).
+    crate::services::jwt::verify_jwt(&token)?;
+
+    // 2. Ensure the session still exists server-side (supports revocation).
     let session = sqlx::query_as::<_, Session>(
         "SELECT * FROM sessions WHERE token = ?1"
     )
@@ -1337,3 +1427,180 @@ pub async fn clear_all_sessions(
         .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn check_permission(
+    pool: State<'_, SqlitePool>,
+    user_id: String,
+    required_role: String,
+) -> Result<bool, String> {
+    crate::services::auth::has_permission(&pool, &user_id, &required_role).await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminResetPasswordPayload {
+    pub user_id: String,
+    pub new_password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangePasswordPayload {
+    pub user_id: String,
+    pub current_password: String,
+    pub new_password: String,
+}
+
+#[tauri::command]
+pub async fn admin_reset_password(
+    pool: State<'_, SqlitePool>,
+    payload: AdminResetPasswordPayload,
+) -> Result<(), String> {
+    let password_hash = hash(&payload.new_password, DEFAULT_COST)
+        .map_err(|e| e.to_string())?;
+
+    sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
+        .bind(&password_hash)
+        .bind(&payload.user_id)
+        .execute(&*pool)
+        .await
+        .map_err(|e: sqlx::Error| e.to_string())?;
+
+    // Invalidate all sessions for this user, forcing re-login
+    sqlx::query("DELETE FROM sessions WHERE user_id = ?1")
+        .bind(&payload.user_id)
+        .execute(&*pool)
+        .await
+        .ok();
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn change_own_password(
+    pool: State<'_, SqlitePool>,
+    payload: ChangePasswordPayload,
+) -> Result<(), String> {
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE id = ?1"
+    )
+    .bind(&payload.user_id)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|_| "User not found".to_string())?;
+
+    let valid = verify(&payload.current_password, &user.password_hash)
+        .map_err(|e| e.to_string())?;
+
+    if !valid {
+        return Err("Current password is incorrect".to_string());
+    }
+
+    let new_hash = hash(&payload.new_password, DEFAULT_COST)
+        .map_err(|e| e.to_string())?;
+
+    sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
+        .bind(&new_hash)
+        .bind(&payload.user_id)
+        .execute(&*pool)
+        .await
+        .map_err(|e: sqlx::Error| e.to_string())?;
+
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRecoveryPayload {
+    pub user_id: String,
+    pub question: String,
+    pub answer: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyRecoveryPayload {
+    pub username: String,
+    pub answer: String,
+    pub new_password: String,
+}
+
+#[tauri::command]
+pub async fn set_recovery_question(
+    pool: State<'_, SqlitePool>,
+    payload: SetRecoveryPayload,
+) -> Result<(), String> {
+    let answer_hash = hash(&payload.answer.to_lowercase().trim(), DEFAULT_COST)
+        .map_err(|e| e.to_string())?;
+
+    sqlx::query(
+        "UPDATE users SET recovery_question = ?1, recovery_answer_hash = ?2 WHERE id = ?3"
+    )
+    .bind(&payload.question)
+    .bind(&answer_hash)
+    .bind(&payload.user_id)
+    .execute(&*pool)
+    .await
+    .map_err(|e: sqlx::Error| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_recovery_question(
+    pool: State<'_, SqlitePool>,
+    username: String,
+) -> Result<Option<String>, String> {
+    let question: Option<String> = sqlx::query_scalar(
+        "SELECT recovery_question FROM users WHERE username = ?1"
+    )
+    .bind(&username)
+    .fetch_optional(&*pool)
+    .await
+    .map_err(|e: sqlx::Error| e.to_string())?
+    .flatten();
+
+    Ok(question)
+}
+
+#[tauri::command]
+pub async fn verify_recovery_answer(
+    pool: State<'_, SqlitePool>,
+    payload: VerifyRecoveryPayload,
+) -> Result<(), String> {
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE username = ?1"
+    )
+    .bind(&payload.username)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|_| "User not found".to_string())?;
+
+    let stored_hash = user.recovery_answer_hash
+        .ok_or("No recovery question set for this account")?;
+
+    let valid = verify(payload.answer.to_lowercase().trim(), &stored_hash)
+        .map_err(|e| e.to_string())?;
+
+    if !valid {
+        return Err("Incorrect answer".to_string());
+    }
+
+    let new_hash = hash(&payload.new_password, DEFAULT_COST)
+        .map_err(|e| e.to_string())?;
+
+    sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
+        .bind(&new_hash)
+        .bind(&user.id)
+        .execute(&*pool)
+        .await
+        .map_err(|e: sqlx::Error| e.to_string())?;
+
+    sqlx::query("DELETE FROM sessions WHERE user_id = ?1")
+        .bind(&user.id)
+        .execute(&*pool)
+        .await
+        .ok();
+
+    Ok(())}

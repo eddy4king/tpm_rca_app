@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
+import MTTRChart from "../components/MTTRChart";
+import { OEEWidget } from "../components/OEEWidget";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Activity,
@@ -10,7 +12,20 @@ import {
   BarChart3,
   ClipboardCheck,
   AlertTriangle,
+  Network,
+  ListTodo,
+  GitCommitVertical,
+  History,
 } from "lucide-react";
+import { EQUIPMENT_STATUS } from "../components/indicators";
+import {
+  PageHeader,
+  Card,
+  LoadingState,
+  Banner,
+} from "../components/ui";
+
+interface NavigateFn { (p: string): void; }
 
 interface Equipment {
   id: string;
@@ -47,34 +62,36 @@ interface CAPA {
   status: string | null;
   priority: string | null;
   due_date: string | null;
+  created_at: string | null;
 }
 
 
 const statusDot: Record<string, string> = {
-  Running: "bg-green-500",
+  Running: "bg-emerald-500",
   Failed: "bg-red-500",
-  Maintenance: "bg-yellow-500",
+  Maintenance: "bg-amber-500",
   Standby: "bg-blue-500",
 };
 
 function KpiCard({
-  label, value, unit, icon, color, sub,
+  label, value, unit, icon, color, sub, accent, tint,
 }: {
   label: string; value: string | number; unit?: string;
   icon: React.ReactNode; color: string; sub?: string;
+  accent?: string; tint?: string;
 }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+    <Card className={`${accent ? `border-l-4 ${accent}` : ""} ${tint || ""}`}>
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm text-slate-500 font-medium">{label}</p>
         <div className={`p-2 rounded-xl ${color}`}>{icon}</div>
       </div>
       <div className="flex items-end gap-1">
-        <h2 className="text-3xl font-bold text-slate-800">{value}</h2>
+        <h2 className="text-3xl font-bold text-slate-900">{value}</h2>
         {unit && <span className="text-sm text-slate-500 mb-1">{unit}</span>}
       </div>
       {sub && <p className="text-xs text-slate-400 mt-1">{sub}</p>}
-    </div>
+    </Card>
   );
 }
 
@@ -103,12 +120,11 @@ function BarChart({ data, label }: { data: { name: string; value: number; color:
   );
 }
 
-function DashboardPage() { // Dashboard renders role‑specific widgets
+function DashboardPage({ onNavigate }: { onNavigate: NavigateFn }) { // Dashboard renders role‑specific widgets
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [downtime, setDowntime] = useState<Downtime[]>([]);
   const [investigations, setInvestigations] = useState<Investigation[]>([]);
   const [capas, setCapas] = useState<CAPA[]>([]); // CAPA data
-  // const [rolePermissions, setRolePermissions] = useState<string[]>([]); // removed unused permissions
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedEquipmentId, setSelectedEquipmentId] = useState("");
@@ -223,29 +239,34 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
     }).sort((a, b) => b.openDowntime - a.openDowntime);
   }, [equipment, downtime]);
 
-  if (loading) return <div className="h-screen flex items-center justify-center text-slate-500">Loading Dashboard...</div>;
-  if (error) return <div className="p-8 text-red-500">{error}</div>;
+  if (loading) return <LoadingState label="Loading Dashboard..." />;
+  if (error) return <Banner tone="error">{error}</Banner>;
 
   return (
-    <div className="bg-slate-100 text-slate-800 overflow-y-auto" style={{ height: "calc(100vh - 80px)" }}>
+    <div className="bg-slate-50 text-slate-800 overflow-y-auto" style={{ height: "100%" }}>
       <div className="px-6 py-5">
 
         {/* HEADER */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold">TPM Dashboard</h1>
-            <p className="text-sm text-slate-500 mt-1">Total Productive Maintenance — Live Plant Overview</p>
+        <PageHeader
+          title="TPM Dashboard"
+          subtitle="Total Productive Maintenance — Live Plant Overview"
+          live
+          actions={
+            <select
+              value={selectedEquipmentId}
+              onChange={e => { setSelectedEquipmentId(e.target.value); loadInvestigations(e.target.value); }}
+              className="border border-slate-300 rounded-xl px-4 py-2 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              {equipment.map(eq => (
+                <option key={eq.id} value={eq.id}>{eq.tag_number} — {eq.name}</option>
+              ))}
+            </select>
+          }
+        />
+          {/* OEE Widget */}
+          <div className="mb-6">
+            <OEEWidget />
           </div>
-          <select
-            value={selectedEquipmentId}
-            onChange={e => { setSelectedEquipmentId(e.target.value); loadInvestigations(e.target.value); }}
-            className="border border-slate-300 rounded-xl px-4 py-2 bg-white text-sm"
-          >
-            {equipment.map(eq => (
-              <option key={eq.id} value={eq.id}>{eq.tag_number} — {eq.name}</option>
-            ))}
-          </select>
-        </div>
 
         {/* TOP KPI ROW */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -255,6 +276,7 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
             unit="%"
             icon={<Activity className="w-5 h-5 text-emerald-600" />}
             color="bg-emerald-50"
+            accent="border-emerald-500"
             sub="Last 30 days"
           />
           <KpiCard
@@ -263,14 +285,16 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
             unit="min"
             icon={<Wrench className="w-5 h-5 text-blue-600" />}
             color="bg-blue-50"
+            accent="border-blue-500"
             sub="Mean Time To Repair"
           />
           <KpiCard
             label="MTBF"
             value={metrics.mtbf}
             unit="hrs"
-            icon={<TrendingUp className="w-5 h-5 text-purple-600" />}
-            color="bg-purple-50"
+            icon={<TrendingUp className="w-5 h-5 text-blue-600" />}
+            color="bg-blue-50"
+            accent="border-blue-500"
             sub="Mean Time Between Failures"
           />
           <KpiCard
@@ -278,6 +302,7 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
             value={metrics.ongoing}
             icon={<AlertTriangle className="w-5 h-5 text-red-600" />}
             color="bg-red-50"
+            accent="border-red-500"
             sub={`${metrics.closed} resolved`}
           />
         </div>
@@ -290,6 +315,7 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
             unit="min"
             icon={<Clock3 className="w-5 h-5 text-amber-600" />}
             color="bg-amber-50"
+            accent="border-amber-500"
             sub="All logged events"
           />
           <KpiCard
@@ -297,6 +323,7 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
             value={capaMetrics.open + capaMetrics.inProgress}
             icon={<ClipboardCheck className="w-5 h-5 text-blue-600" />}
             color="bg-blue-50"
+            accent="border-blue-500"
             sub={`${capaMetrics.closed} closed`}
           />
           <KpiCard
@@ -304,6 +331,7 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
             value={capaMetrics.critical}
             icon={<AlertTriangle className="w-5 h-5 text-red-600" />}
             color="bg-red-50"
+            accent="border-red-500"
             sub="Unresolved critical actions"
           />
           <KpiCard
@@ -311,42 +339,76 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
             value={capaMetrics.overdue}
             icon={<TrendingDown className="w-5 h-5 text-orange-600" />}
             color="bg-orange-50"
+            accent="border-orange-500"
             sub="Past due date"
           />
         </div>
 
         {/* CHARTS ROW */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+          <Card>
             <div className="flex items-center gap-2 mb-4">
               <BarChart3 className="w-5 h-5 text-slate-500" />
-              <h3 className="font-bold">Downtime by Loss Category</h3>
+              <h3 className="font-bold text-slate-800">Downtime by Loss Category</h3>
             </div>
             <BarChart data={metrics.categoryData} label="Events per category" />
-          </div>
+          </Card>
 
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+          <Card>
+            <div className="flex items-center gap-2 mb-4">
+              <Wrench className="w-5 h-5 text-slate-500" />
+              <h3 className="font-bold text-slate-800">MTTR Trend (last 7 days)</h3>
+            </div>
+            <MTTRChart data={Array.from({ length: 7 }, (_, i) => ({ date: `Day ${i + 1}`, mttr: metrics.mttr }))} />
+          </Card>
+
+          <Card>
             <div className="flex items-center gap-2 mb-4">
               <ClipboardCheck className="w-5 h-5 text-slate-500" />
-              <h3 className="font-bold">CAPA by Priority</h3>
+              <h3 className="font-bold text-slate-800">CAPA by Priority</h3>
             </div>
             <BarChart data={capaMetrics.priorityData} label="Actions per priority level" />
-          </div>
+          </Card>
+        </div>
+
+        {/* REAL-TIME STATUS + QUICK ACCESS */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+          <Card>
+            <h3 className="font-bold text-slate-800 mb-4">Live Equipment Status</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {Object.entries(EQUIPMENT_STATUS).map(([label, meta]) => (
+                <div key={label} className="flex items-center gap-2">
+                  <span className={`w-2.5 h-2.5 rounded-full ${meta.dot} ${meta.live ? "animate-pulse" : ""}`} />
+                  <span className="text-sm text-slate-600">{label}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="md:col-span-2">
+            <h3 className="font-bold text-slate-800 mb-4">Quick Access</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <QuickLink icon={<Network className="w-5 h-5" />} label="Hierarchy" onClick={() => onNavigate("hierarchy")} />
+              <QuickLink icon={<ListTodo className="w-5 h-5" />} label="Tasks" onClick={() => onNavigate("tasks")} />
+              <QuickLink icon={<GitCommitVertical className="w-5 h-5" />} label="Timeline" onClick={() => onNavigate("timeline")} />
+              <QuickLink icon={<History className="w-5 h-5" />} label="Audit" onClick={() => onNavigate("audit")} />
+            </div>
+          </Card>
         </div>
 
         {/* BOTTOM ROW */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
           {/* EQUIPMENT HEALTH */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-            <h3 className="font-bold mb-4">Equipment Health Overview</h3>
+          <Card>
+            <h3 className="font-bold text-slate-800 mb-4">Equipment Health Overview</h3>
             <div className="space-y-3">
               {equipmentHealth.slice(0, 6).map(eq => (
                 <div key={eq.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
                   <div className="flex items-center gap-3">
-                    <span className={`w-2.5 h-2.5 rounded-full ${statusDot[eq.status || ""] || "bg-slate-400"}`}></span>
+                    <span className={`w-2.5 h-2.5 rounded-full ${statusDot[eq.status || ""] || "bg-slate-400"} ${eq.status === "Failed" ? "animate-pulse" : ""}`}></span>
                     <div>
-                      <p className="text-sm font-medium">{eq.tag_number} — {eq.name}</p>
+                      <p className="text-sm font-medium text-slate-800">{eq.tag_number} — {eq.name}</p>
                       <p className="text-xs text-slate-400">{eq.criticality} criticality</p>
                     </div>
                   </div>
@@ -359,11 +421,11 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
                 </div>
               ))}
             </div>
-          </div>
+          </Card>
 
           {/* OPEN INVESTIGATIONS */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-            <h3 className="font-bold mb-4">Open RCA Investigations</h3>
+          <Card>
+            <h3 className="font-bold text-slate-800 mb-4">Open RCA Investigations</h3>
             {investigations.filter(i => i.status !== "Closed").length === 0 ? (
               <div className="text-center py-8">
                 <CheckCircle2 className="w-10 h-10 text-emerald-400 mx-auto mb-2" />
@@ -374,11 +436,11 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
                 {investigations.filter(i => i.status !== "Closed").slice(0, 5).map(inv => (
                   <div key={inv.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
                     <div>
-                      <p className="text-sm font-medium">{inv.title}</p>
+                      <p className="text-sm font-medium text-slate-800">{inv.title}</p>
                       <p className="text-xs text-slate-400">{inv.created_at?.slice(0, 10)}</p>
                     </div>
-                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                      inv.status === "In Progress" ? "bg-amber-100 text-amber-700" : "bg-red-100 text-red-700"
+                    <span className={`px-3 py-1 rounded-full text-xs font-medium border ${
+                      inv.status === "In Progress" ? "bg-amber-100 text-amber-700 border-amber-200" : "bg-red-100 text-red-700 border-red-200"
                     }`}>
                       {inv.status}
                     </span>
@@ -386,7 +448,7 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
                 ))}
               </div>
             )}
-          </div>
+          </Card>
         </div>
 
       </div>
@@ -395,3 +457,15 @@ function DashboardPage() { // Dashboard renders role‑specific widgets
 }
 
 export default DashboardPage;
+
+function QuickLink({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-center justify-center gap-2 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-2xl py-4 transition-colors duration-150 text-slate-600 hover:text-blue-700"
+    >
+      <span className="text-blue-600">{icon}</span>
+      <span className="text-sm font-medium">{label}</span>
+    </button>
+  );
+}

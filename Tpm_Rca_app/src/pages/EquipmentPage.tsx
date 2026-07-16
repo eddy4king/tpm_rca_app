@@ -1,11 +1,33 @@
-import {
-  useState,
-  useEffect,
-  useMemo,
-  useCallback,
-} from "react";
-
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
+import { StatusBadge, LiveIndicator } from "../components/indicators";
+import {
+  Button,
+  Card,
+  Input,
+  Select,
+  Textarea,
+  Badge,
+  Info,
+  PageHeader,
+  StatCard,
+  Field,
+  TableCard,
+  LoadingState,
+  Banner,
+  Modal,
+  tableHeadClass,
+  thClass,
+  tdClass,
+  trClass,
+} from "../components/ui";
+import {
+  Search, Plus, Pencil, Trash2, Cog, ChevronLeft, Layers, Download, QrCode as QrIcon,
+} from "lucide-react";
+import { exportToCsv } from "../lib/export";
+import QrCode, { equipmentQrValue, parseEquipmentQr } from "../components/QrCode";
 
 interface Equipment {
   id: string;
@@ -17,9 +39,13 @@ interface Equipment {
   status: string | null;
   equipment_type: string | null;
   parent_id: string | null;
+  area_id: string | null;
   created_at: string | null;
   updated_at: string | null;
 }
+
+interface Area { id: string; plant_id: string; name: string | null; }
+interface Plant { id: string; name: string | null; }
 
 const defaultForm = {
   tag_number: "",
@@ -30,59 +56,36 @@ const defaultForm = {
   status: "Running",
   equipment_type: "",
   parent_id: "",
+  area_id: "",
 };
 
-function getStatusColor(
-  status: string | null
-) {
-  switch (status) {
-    case "Running":
-      return "bg-green-100 text-green-700 border border-green-200";
-
-    case "Standby":
-      return "bg-blue-100 text-blue-700 border border-blue-200";
-
-    case "Under Maintenance":
-      return "bg-yellow-100 text-yellow-700 border border-yellow-200";
-
-    case "Failed":
-      return "bg-red-100 text-red-700 border border-red-200";
-
-    default:
-      return "bg-gray-100 text-gray-700 border border-gray-200";
+function getCriticalityColor(criticality: string | null) {
+  switch (criticality) {
+    case "Critical": return "bg-red-100 text-red-700 border-red-200";
+    case "High": return "bg-orange-100 text-orange-700 border-orange-200";
+    case "Medium": return "bg-blue-100 text-blue-700 border-blue-200";
+    case "Low": return "bg-slate-100 text-slate-600 border-slate-200";
+    default: return "bg-gray-100 text-gray-700 border-gray-200";
   }
 }
 
-function getCriticalityColor(
-  criticality: string | null
-) {
-  switch (criticality) {
-    case "Critical":
-      return "bg-red-100 text-red-700 border border-red-200";
-
-    case "High":
-      return "bg-orange-100 text-orange-700 border border-orange-200";
-
-    case "Medium":
-      return "bg-yellow-100 text-yellow-700 border border-yellow-200";
-
-    case "Low":
-      return "bg-green-100 text-green-700 border border-green-200";
-
-    default:
-      return "bg-gray-100 text-gray-700 border border-gray-200";
-  }
+function initialsOf(eq: Equipment) {
+  const base = eq.name || eq.tag_number || "?";
+  return base.replace(/[^a-zA-Z0-9 ]/g, "").slice(0, 2).toUpperCase();
 }
 
 function EquipmentPage() {
-  const [equipment, setEquipment] =
-    useState<Equipment[]>([]);
+  const { canEdit } = useAuth();
+  const toast = useToast();
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const [lookupValue, setLookupValue] = useState("");
+  const canEditEquipment = canEdit("Engineer");
 
-  const [loading, setLoading] =
-    useState(true);
-
-  const [selectedEquipment, setSelectedEquipment] =
-    useState<Equipment | null>(null);
+  const [equipment, setEquipment] = useState<Equipment[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [plants, setPlants] = useState<Plant[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
 
   const [ui, setUi] = useState({
     error: null as string | null,
@@ -94,942 +97,452 @@ function EquipmentPage() {
     typeFilter: "",
   });
 
-  const [form, setForm] =
-    useState(defaultForm);
+  const [form, setForm] = useState(defaultForm);
 
-  const stats = useMemo(() => {
-    return {
-      total: equipment.length,
+  const stats = useMemo(() => ({
+    total: equipment.length,
+    running: equipment.filter((e) => e.status === "Running").length,
+    failed: equipment.filter((e) => e.status === "Failed").length,
+    maintenance: equipment.filter((e) => e.status === "Under Maintenance").length,
+  }), [equipment]);
 
-      running: equipment.filter(
-        (e) => e.status === "Running"
-      ).length,
+  const equipmentTypes = useMemo(
+    () => [...new Set(equipment.map((e) => e.equipment_type).filter(Boolean))] as string[],
+    [equipment]
+  );
 
-      failed: equipment.filter(
-        (e) => e.status === "Failed"
-      ).length,
+  const filteredEquipment = useMemo(() => equipment.filter((eq) => {
+    const matchesSearch = !ui.search ||
+      `${eq.tag_number} ${eq.name} ${eq.location} ${eq.equipment_type}`.toLowerCase().includes(ui.search.toLowerCase());
+    const matchesStatus = !ui.statusFilter || eq.status === ui.statusFilter;
+    const matchesCriticality = !ui.criticalityFilter || eq.criticality === ui.criticalityFilter;
+    const matchesType = !ui.typeFilter || eq.equipment_type === ui.typeFilter;
+    return matchesSearch && matchesStatus && matchesCriticality && matchesType;
+  }), [equipment, ui]);
 
-      maintenance: equipment.filter(
-        (e) =>
-          e.status ===
-          "Under Maintenance"
-      ).length,
-    };
-  }, [equipment]);
+  const areaMap = useMemo(() => new Map(areas.map((a) => [a.id, a])), [areas]);
+  const plantMap = useMemo(() => new Map(plants.map((p) => [p.id, p])), [plants]);
+  function areaLabel(areaId: string | null) {
+    if (!areaId) return "—";
+    const a = areaMap.get(areaId);
+    if (!a) return "—";
+    const plant = plantMap.get(a.plant_id);
+    return `${plant?.name || "Plant"} / ${a.name || "Area"}`;
+  }
 
-  const equipmentTypes = useMemo(() => {
-    return [
-      ...new Set(
-        equipment
-          .map(
-            (e) =>
-              e.equipment_type
-          )
-          .filter(Boolean)
-      ),
-    ];
-  }, [equipment]);
+  const loadEquipment = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [eq, ar, pl] = await Promise.all([
+        invoke<Equipment[]>("get_all_equipment"),
+        invoke<Area[]>("get_all_areas"),
+        invoke<Plant[]>("get_all_plants"),
+      ]);
+      setEquipment(eq);
+      setAreas(ar);
+      setPlants(pl);
+    } catch (err) {
+      setUi((prev) => ({ ...prev, error: String(err) }));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  const filteredEquipment =
-    useMemo(() => {
-      return equipment.filter((eq) => {
-        const matchesSearch =
-          !ui.search ||
-          `${eq.tag_number} ${eq.name} ${eq.location} ${eq.equipment_type}`
-            .toLowerCase()
-            .includes(
-              ui.search.toLowerCase()
-            );
-
-        const matchesStatus =
-          !ui.statusFilter ||
-          eq.status ===
-            ui.statusFilter;
-
-        const matchesCriticality =
-          !ui.criticalityFilter ||
-          eq.criticality ===
-            ui.criticalityFilter;
-
-        const matchesType =
-          !ui.typeFilter ||
-          eq.equipment_type ===
-            ui.typeFilter;
-
-        return (
-          matchesSearch &&
-          matchesStatus &&
-          matchesCriticality &&
-          matchesType
-        );
-      });
-    }, [equipment, ui]);
-
-  const loadEquipment =
-    useCallback(async () => {
-      try {
-        setLoading(true);
-
-        const data =
-          await invoke<Equipment[]>(
-            "get_all_equipment"
-          );
-
-        setEquipment(data);
-      } catch (err) {
-        setUi((prev) => ({
-          ...prev,
-          error: String(err),
-        }));
-      } finally {
-        setLoading(false);
-      }
-    }, []);
-
-  useEffect(() => {
-    loadEquipment();
-  }, [loadEquipment]);
+  useEffect(() => { loadEquipment(); }, [loadEquipment]);
 
   function resetForm() {
     setForm(defaultForm);
-
-    setUi((prev) => ({
-      ...prev,
-      editingId: null,
-    }));
+    setUi((prev) => ({ ...prev, editingId: null }));
   }
 
   async function handleCreate() {
     try {
-      await invoke(
-        "create_equipment",
-        {
-          payload: {
-            tagNumber:
-              form.tag_number,
-            name: form.name,
-            description:
-              form.description ||
-              null,
-            location:
-              form.location ||
-              null,
-            criticality:
-              form.criticality,
-            status: form.status,
-            equipmentType:
-              form.equipment_type ||
-              null,
-            parentId:
-              form.parent_id ||
-              null,
-          },
-        }
-      );
-
+      await invoke("create_equipment", {
+        payload: {
+          tagNumber: form.tag_number,
+          name: form.name,
+          description: form.description || null,
+          location: form.location || null,
+          criticality: form.criticality,
+          status: form.status,
+          equipmentType: form.equipment_type || null,
+          parentId: form.parent_id || null,
+          areaId: form.area_id || null,
+        },
+      });
       await loadEquipment();
-
       resetForm();
-
-      setUi((prev) => ({
-        ...prev,
-        showForm: false,
-      }));
+      setUi((prev) => ({ ...prev, showForm: false }));
+      toast.success(`Equipment "${form.tag_number}" created`);
     } catch (err) {
-      setUi((prev) => ({
-        ...prev,
-        error: String(err),
-      }));
+      setUi((prev) => ({ ...prev, error: String(err) }));
+      toast.error(`Failed to create equipment: ${err}`);
     }
   }
 
   async function handleUpdate() {
     try {
-      await invoke(
-        "update_equipment",
-        {
-          payload: {
-            id: ui.editingId,
-            tagNumber:
-              form.tag_number ||
-              null,
-            name:
-              form.name || null,
-            description:
-              form.description ||
-              null,
-            location:
-              form.location ||
-              null,
-            criticality:
-              form.criticality ||
-              null,
-            status:
-              form.status || null,
-            equipmentType:
-              form.equipment_type ||
-              null,
-            parentId:
-              form.parent_id ||
-              null,
-          },
-        }
-      );
-
+      await invoke("update_equipment", {
+        payload: {
+          id: ui.editingId,
+          tagNumber: form.tag_number || null,
+          name: form.name || null,
+          description: form.description || null,
+          location: form.location || null,
+          criticality: form.criticality || null,
+          status: form.status || null,
+          equipmentType: form.equipment_type || null,
+          parentId: form.parent_id || null,
+          areaId: form.area_id || null,
+        },
+      });
       await loadEquipment();
-
       resetForm();
-
-      setUi((prev) => ({
-        ...prev,
-        showForm: false,
-      }));
+      setUi((prev) => ({ ...prev, showForm: false }));
+      toast.success("Equipment updated");
     } catch (err) {
-      setUi((prev) => ({
-        ...prev,
-        error: String(err),
-      }));
+      setUi((prev) => ({ ...prev, error: String(err) }));
+      toast.error(`Failed to update equipment: ${err}`);
     }
   }
 
-  async function handleDelete(
-    id: string
-  ) {
-    const confirmed = confirm(
-      "Delete this equipment?"
-    );
-
-    if (!confirmed) return;
-
+  async function handleDelete(id: string) {
+    if (!confirm("Delete this equipment?")) return;
     try {
-      await invoke(
-        "delete_equipment",
-        { id }
-      );
-
-      setEquipment((prev) =>
-        prev.filter(
-          (eq) => eq.id !== id
-        )
-      );
-
+      await invoke("delete_equipment", { id });
+      setEquipment((prev) => prev.filter((eq) => eq.id !== id));
       setSelectedEquipment(null);
+      toast.success("Equipment deleted");
     } catch (err) {
-      setUi((prev) => ({
-        ...prev,
-        error: String(err),
-      }));
+      setUi((prev) => ({ ...prev, error: String(err) }));
+      toast.error(`Failed to delete equipment: ${err}`);
+    }
+  }
+
+  function handleLookup() {
+    const raw = lookupValue.trim();
+    if (!raw) return;
+    // Accept either a scanned QR payload (tpm-rca://equipment/<id>) or a plain tag number.
+    const id = parseEquipmentQr(raw);
+    let match: Equipment | undefined;
+    if (id) match = equipment.find((eq) => eq.id === id);
+    if (!match) {
+      match = equipment.find(
+        (eq) => (eq.tag_number || "").toLowerCase() === raw.toLowerCase()
+      );
+    }
+    if (match) {
+      setSelectedEquipment(match);
+      setLookupOpen(false);
+      setLookupValue("");
+      toast.success(`Found ${match.tag_number || match.name}`);
+    } else {
+      toast.error("No equipment matches that code or tag");
     }
   }
 
   function handleEdit(eq: Equipment) {
     setForm({
-      tag_number:
-        eq.tag_number || "",
+      tag_number: eq.tag_number || "",
       name: eq.name || "",
-      description:
-        eq.description || "",
-      location:
-        eq.location || "",
-      criticality:
-        eq.criticality ||
-        "Medium",
-      status:
-        eq.status || "Running",
-      equipment_type:
-        eq.equipment_type || "",
-      parent_id:
-        eq.parent_id || "",
+      description: eq.description || "",
+      location: eq.location || "",
+      criticality: eq.criticality || "Medium",
+      status: eq.status || "Running",
+      equipment_type: eq.equipment_type || "",
+      parent_id: eq.parent_id || "",
+      area_id: eq.area_id || "",
     });
-
-    setUi((prev) => ({
-      ...prev,
-      editingId: eq.id,
-      showForm: true,
-    }));
-
+    setUi((prev) => ({ ...prev, editingId: eq.id, showForm: true }));
     setSelectedEquipment(null);
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <div className="text-center">
-          <div className="w-10 h-10 border-4 border-slate-300 border-t-slate-700 rounded-full animate-spin mx-auto mb-4" />
-
-          <p className="text-gray-500">
-            Loading equipment...
-          </p>
-        </div>
-      </div>
-    );
+    return <LoadingState label="Loading equipment..." />;
   }
 
   if (ui.error) {
-    return (
-      <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4">
-        {ui.error}
-      </div>
-    );
+    return <Banner tone="error">{ui.error}</Banner>;
   }
 
   if (selectedEquipment) {
+    const eq = selectedEquipment;
     return (
-      <div className="space-y-5">
+      <div className="space-y-5 p-6 h-full overflow-y-auto">
         <button
-          onClick={() =>
-            setSelectedEquipment(
-              null
-            )
-          }
-          className="text-sm text-slate-600 hover:text-slate-900"
+          onClick={() => setSelectedEquipment(null)}
+          className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900 transition-colors"
         >
-          ← Back to Equipment
+          <ChevronLeft className="w-4 h-4" /> Back to Equipment
         </button>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-          <div className="flex justify-between items-start mb-8">
-            <div>
-              <p className="text-sm text-slate-500">
-                {
-                  selectedEquipment.tag_number
-                }
-              </p>
-
-              <h2 className="text-3xl font-bold text-slate-800 mt-1">
-                {
-                  selectedEquipment.name
-                }
-              </h2>
+        <Card className="!p-0 overflow-hidden">
+          <div className="flex items-start justify-between gap-4 p-6 bg-slate-50 border-b border-slate-100">
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 grid place-items-center text-lg font-bold">
+                {initialsOf(eq)}
+              </div>
+              <div>
+                <p className="text-sm text-slate-500 font-mono">{eq.tag_number}</p>
+                <h2 className="text-2xl font-bold text-slate-900">{eq.name}</h2>
+              </div>
             </div>
-
             <div className="flex gap-2">
-              <span
-                className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
-                  selectedEquipment.status
-                )}`}
-              >
-                {
-                  selectedEquipment.status
-                }
-              </span>
-
-              <span
-                className={`px-3 py-1 rounded-full text-xs font-medium ${getCriticalityColor(
-                  selectedEquipment.criticality
-                )}`}
-              >
-                {
-                  selectedEquipment.criticality
-                }
-              </span>
+              <StatusBadge label={eq.status} kind="equipment" />
+              <Badge className={getCriticalityColor(eq.criticality)}>
+                {eq.criticality} Criticality
+              </Badge>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <p className="text-sm text-slate-500">
-                Equipment Type
-              </p>
-
-              <p className="font-medium mt-1">
-                {selectedEquipment.equipment_type ||
-                  "—"}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-sm text-slate-500">
-                Location
-              </p>
-
-              <p className="font-medium mt-1">
-                {selectedEquipment.location ||
-                  "—"}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-5 p-6">
+            <Info label="Equipment Type" value={eq.equipment_type || "—"} />
+            <Info label="Location" value={eq.location} />
+            <Info label="Plant / Area" value={areaLabel(eq.area_id)} />
+            <Info label="Parent Equipment" value={eq.parent_id} />
+            <Info label="Created" value={eq.created_at} />
+            <Info label="Updated" value={eq.updated_at} />
+            <div className="col-span-2 md:col-span-3">
+              <p className="text-sm text-slate-500">Description</p>
+              <p className="font-medium mt-1 whitespace-pre-wrap leading-relaxed text-slate-700">
+                {eq.description || "—"}
               </p>
             </div>
-
-            <div>
-              <p className="text-sm text-slate-500">
-                Parent Equipment
-              </p>
-
-              <p className="font-medium mt-1">
-                {selectedEquipment.parent_id ||
-                  "—"}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-sm text-slate-500">
-                Created
-              </p>
-
-              <p className="font-medium mt-1">
-                {selectedEquipment.created_at ||
-                  "—"}
-              </p>
-            </div>
-
-            <div>
-              <p className="text-sm text-slate-500">
-                Updated
-              </p>
-
-              <p className="font-medium mt-1">
-                {selectedEquipment.updated_at ||
-                  "—"}
-              </p>
-            </div>
-
-            <div className="col-span-2">
-              <p className="text-sm text-slate-500">
-                Description
-              </p>
-
-              <p className="font-medium mt-1 whitespace-pre-wrap leading-relaxed">
-                {selectedEquipment.description ||
-                  "—"}
-              </p>
+            <div className="col-span-2 md:col-span-3 border-t border-slate-100 pt-5">
+              <p className="text-sm text-slate-500 mb-3">Asset QR Tag</p>
+              <QrCode
+                value={equipmentQrValue(eq.id, eq.tag_number)}
+                downloadName={`equipment-${eq.tag_number || eq.id}`}
+                label={eq.tag_number || eq.id}
+              />
             </div>
           </div>
 
-          <div className="flex gap-3 mt-8">
-            <button
-              onClick={() =>
-                handleEdit(
-                  selectedEquipment
-                )
-              }
-              className="bg-blue-600 text-white px-5 py-2 rounded-lg hover:bg-blue-500 transition"
-            >
-              Edit Equipment
-            </button>
-
-            <button
-              onClick={() =>
-                handleDelete(
-                  selectedEquipment.id
-                )
-              }
-              className="bg-red-600 text-white px-5 py-2 rounded-lg hover:bg-red-500 transition"
-            >
-              Delete Equipment
-            </button>
-          </div>
-        </div>
+          {canEditEquipment && (
+            <div className="flex gap-3 px-6 pb-6">
+              <Button variant="edit" onClick={() => handleEdit(eq)}>
+                <Pencil className="w-4 h-4" /> Edit Equipment
+              </Button>
+              <Button variant="danger" onClick={() => handleDelete(eq.id)}>
+                <Trash2 className="w-4 h-4" /> Delete Equipment
+              </Button>
+            </div>
+          )}
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-800">
-            Equipment Register
-          </h1>
-
-          <p className="text-slate-500 mt-1">
-            Centralized industrial
-            equipment management
-          </p>
-        </div>
-
-        <button
-          onClick={() => {
-            resetForm();
-
-            setUi((prev) => ({
-              ...prev,
-              showForm:
-                !prev.showForm,
-            }));
-          }}
-          className="bg-slate-800 text-white px-5 py-3 rounded-xl hover:bg-slate-700 transition shadow-sm"
-        >
-          + Add Equipment
-        </button>
-      </div>
-
-      <div className="grid grid-cols-4 gap-5">
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <p className="text-sm text-slate-500">
-            Total Equipment
-          </p>
-
-          <h3 className="text-3xl font-bold mt-2">
-            {stats.total}
-          </h3>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <p className="text-sm text-slate-500">
-            Running
-          </p>
-
-          <h3 className="text-3xl font-bold text-green-600 mt-2">
-            {stats.running}
-          </h3>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <p className="text-sm text-slate-500">
-            Under Maintenance
-          </p>
-
-          <h3 className="text-3xl font-bold text-yellow-600 mt-2">
-            {
-              stats.maintenance
-            }
-          </h3>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-          <p className="text-sm text-slate-500">
-            Failed
-          </p>
-
-          <h3 className="text-3xl font-bold text-red-600 mt-2">
-            {stats.failed}
-          </h3>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-        <div className="grid grid-cols-4 gap-4">
-          <input
-            placeholder="Search equipment..."
-            value={ui.search}
-            onChange={(e) =>
-              setUi((prev) => ({
-                ...prev,
-                search:
-                  e.target.value,
-              }))
-            }
-            className="border border-slate-300 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-slate-400"
-          />
-
-          <select
-            value={ui.statusFilter}
-            onChange={(e) =>
-              setUi((prev) => ({
-                ...prev,
-                statusFilter:
-                  e.target.value,
-              }))
-            }
-            className="border border-slate-300 rounded-xl p-3"
-          >
-            <option value="">
-              All Status
-            </option>
-
-            <option>
-              Running
-            </option>
-
-            <option>
-              Standby
-            </option>
-
-            <option>
-              Under Maintenance
-            </option>
-
-            <option>
-              Failed
-            </option>
-          </select>
-
-          <select
-            value={
-              ui.criticalityFilter
-            }
-            onChange={(e) =>
-              setUi((prev) => ({
-                ...prev,
-                criticalityFilter:
-                  e.target.value,
-              }))
-            }
-            className="border border-slate-300 rounded-xl p-3"
-          >
-            <option value="">
-              All Criticality
-            </option>
-
-            <option>
-              Critical
-            </option>
-
-            <option>
-              High
-            </option>
-
-            <option>
-              Medium
-            </option>
-
-            <option>
-              Low
-            </option>
-          </select>
-
-          <select
-            value={ui.typeFilter}
-            onChange={(e) =>
-              setUi((prev) => ({
-                ...prev,
-                typeFilter:
-                  e.target.value,
-              }))
-            }
-            className="border border-slate-300 rounded-xl p-3"
-          >
-            <option value="">
-              All Types
-            </option>
-
-            {equipmentTypes.map(
-              (type) => (
-                <option
-                  key={String(type)}
-                >
-                  {type}
-                </option>
-              )
+    <div className="space-y-6 p-6 h-full overflow-y-auto">
+      {lookupOpen && (
+        <Modal title="QR / Tag Lookup" onClose={() => setLookupOpen(false)} maxWidth="max-w-md">
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Scan an asset QR tag and paste its contents here, or type an equipment tag number.
+            </p>
+            <Field label="Scanned code or tag number">
+              <Input
+                autoFocus
+                placeholder="tpm-rca://equipment/…  or  PUMP-001"
+                value={lookupValue}
+                onChange={(e) => setLookupValue(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleLookup()}
+              />
+            </Field>
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setLookupOpen(false)}>Cancel</Button>
+              <Button onClick={handleLookup}>Find Equipment</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      <PageHeader
+        title="Equipment Register"
+        subtitle="Centralized industrial equipment management"
+        actions={
+          <>
+            <LiveIndicator />
+            <Button variant="secondary" onClick={() => setLookupOpen(true)}>
+              <QrIcon className="w-4 h-4" /> QR Lookup
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={!filteredEquipment.length}
+              onClick={() => {
+                exportToCsv("equipment", filteredEquipment, [
+                  { key: "tag_number", label: "Tag Number" },
+                  { key: "name", label: "Name" },
+                  { key: "equipment_type", label: "Type" },
+                  { key: "status", label: "Status" },
+                  { key: "criticality", label: "Criticality" },
+                  { key: "location", label: "Location" },
+                  { key: "area_id", label: "Area", format: (v) => areaLabel(v as string | null) },
+                  { key: "description", label: "Description" },
+                  { key: "created_at", label: "Created At" },
+                ]);
+                toast.success(`Exported ${filteredEquipment.length} equipment records`);
+              }}
+            >
+              <Download className="w-4 h-4" /> Export CSV
+            </Button>
+            {canEditEquipment && (
+              <Button
+                onClick={() => { resetForm(); setUi((prev) => ({ ...prev, showForm: !prev.showForm })); }}
+              >
+                <Plus className="w-4 h-4" /> Add Equipment
+              </Button>
             )}
-          </select>
-        </div>
+          </>
+        }
+      />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard icon={<Layers className="w-5 h-5" />} tint="slate" label="Total Equipment" value={<span className="text-slate-900">{stats.total}</span>} />
+        <StatCard icon={<Cog className="w-5 h-5" />} tint="emerald" label="Running" value={<span className="text-emerald-600">{stats.running}</span>} />
+        <StatCard icon={<Cog className="w-5 h-5" />} tint="amber" label="Under Maintenance" value={<span className="text-amber-600">{stats.maintenance}</span>} />
+        <StatCard icon={<Cog className="w-5 h-5" />} tint="rose" label="Failed" value={<span className="text-red-600">{stats.failed}</span>} />
       </div>
 
-      {ui.showForm && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xl font-semibold">
-              {ui.editingId
-                ? "Edit Equipment"
-                : "Create Equipment"}
-            </h3>
-
-            <button
-              onClick={() =>
-                setUi((prev) => ({
-                  ...prev,
-                  showForm: false,
-                }))
-              }
-              className="text-slate-500 hover:text-slate-800"
-            >
-              ✕
-            </button>
+      <Card>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="relative md:col-span-1">
+            <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+            <Input
+              placeholder="Search equipment..."
+              value={ui.search}
+              onChange={(e) => setUi((prev) => ({ ...prev, search: e.target.value }))}
+              className="pl-10"
+            />
           </div>
-
-          <div className="grid grid-cols-2 gap-5">
-            <input
-              placeholder="Tag Number"
-              value={form.tag_number}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  tag_number:
-                    e.target.value,
-                })
-              }
-              className="border border-slate-300 rounded-xl p-3"
-            />
-
-            <input
-              placeholder="Equipment Name"
-              value={form.name}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  name:
-                    e.target.value,
-                })
-              }
-              className="border border-slate-300 rounded-xl p-3"
-            />
-
-            <input
-              placeholder="Equipment Type"
-              value={
-                form.equipment_type
-              }
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  equipment_type:
-                    e.target.value,
-                })
-              }
-              className="border border-slate-300 rounded-xl p-3"
-            />
-
-            <input
-              placeholder="Location"
-              value={form.location}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  location:
-                    e.target.value,
-                })
-              }
-              className="border border-slate-300 rounded-xl p-3"
-            />
-
-            <select
-              value={
-                form.criticality
-              }
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  criticality:
-                    e.target.value,
-                })
-              }
-              className="border border-slate-300 rounded-xl p-3"
-            >
-              <option>
-                Critical
-              </option>
-
-              <option>
-                High
-              </option>
-
-              <option>
-                Medium
-              </option>
-
-              <option>
-                Low
-              </option>
-            </select>
-
-            <select
-              value={form.status}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  status:
-                    e.target.value,
-                })
-              }
-              className="border border-slate-300 rounded-xl p-3"
-            >
-              <option>
-                Running
-              </option>
-
-              <option>
-                Standby
-              </option>
-
-              <option>
-                Under Maintenance
-              </option>
-
-              <option>
-                Failed
-              </option>
-            </select>
-
-            <input
-              placeholder="Parent Equipment ID (optional)"
-              value={form.parent_id}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  parent_id:
-                    e.target.value,
-                })
-              }
-              className="border border-slate-300 rounded-xl p-3 col-span-2"
-            />
-
-            <textarea
-              placeholder="Description"
-              value={form.description}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  description:
-                    e.target.value,
-                })
-              }
-              className="border border-slate-300 rounded-xl p-3 min-h-[120px] col-span-2"
-            />
-
-            <button
-              onClick={
-                ui.editingId
-                  ? handleUpdate
-                  : handleCreate
-              }
-              className="bg-slate-800 text-white py-3 rounded-xl hover:bg-slate-700 transition col-span-2 font-medium"
-            >
-              {ui.editingId
-                ? "Update Equipment"
-                : "Save Equipment"}
-            </button>
-          </div>
+          <Select value={ui.statusFilter} onChange={(e) => setUi((p) => ({ ...p, statusFilter: e.target.value }))}>
+            <option value="">All Status</option>
+            <option value="Running">Running</option>
+            <option value="Standby">Standby</option>
+            <option value="Under Maintenance">Under Maintenance</option>
+            <option value="Failed">Failed</option>
+          </Select>
+          <Select value={ui.criticalityFilter} onChange={(e) => setUi((p) => ({ ...p, criticalityFilter: e.target.value }))}>
+            <option value="">All Criticality</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+          </Select>
+          <Select value={ui.typeFilter} onChange={(e) => setUi((p) => ({ ...p, typeFilter: e.target.value }))}>
+            <option value="">All Types</option>
+            {equipmentTypes.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </Select>
         </div>
+      </Card>
+
+      {ui.showForm && canEditEquipment && (
+        <Card className="p-6">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="text-xl font-bold text-slate-900">{ui.editingId ? "Edit Equipment" : "Create Equipment"}</h3>
+            <button onClick={() => setUi((prev) => ({ ...prev, showForm: false }))} className="text-slate-400 hover:text-slate-700 text-lg" aria-label="Close">✕</button>
+          </div>
+          <div className="grid grid-cols-2 gap-5">
+              <Field label="Tag Number"><Input placeholder="Tag Number" value={form.tag_number} onChange={(e) => setForm({ ...form, tag_number: e.target.value })} /></Field>
+              <Field label="Equipment Name"><Input placeholder="Equipment Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+              <Field label="Equipment Type"><Input placeholder="Equipment Type" value={form.equipment_type} onChange={(e) => setForm({ ...form, equipment_type: e.target.value })} /></Field>
+              <Field label="Location"><Input placeholder="Location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
+              <Field label="Criticality">
+                <Select value={form.criticality} onChange={(e) => setForm({ ...form, criticality: e.target.value })}>
+                  <option>Critical</option><option>High</option><option>Medium</option><option>Low</option>
+                </Select>
+              </Field>
+              <Field label="Status">
+                <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  <option>Running</option><option>Standby</option><option>Under Maintenance</option><option>Failed</option>
+                </Select>
+              </Field>
+              <Field label="Plant / Area" className="col-span-2">
+                <Select value={form.area_id} onChange={(e) => setForm({ ...form, area_id: e.target.value })}>
+                  <option value="">No Area (unassigned)</option>
+                  {plants.map((p) => (
+                    <optgroup key={p.id} label={p.name || "Plant"}>
+                      {areas.filter((a) => a.plant_id === p.id).map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Parent Equipment ID (optional)" className="col-span-2">
+                <Input placeholder="Parent Equipment ID (optional)" value={form.parent_id} onChange={(e) => setForm({ ...form, parent_id: e.target.value })} />
+              </Field>
+              <Field label="Description" className="col-span-2">
+                <Textarea placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+              </Field>
+              <Button variant="primary" className="col-span-2" onClick={ui.editingId ? handleUpdate : handleCreate}>
+                {ui.editingId ? "Update Equipment" : "Save Equipment"}
+              </Button>
+            </div>
+        </Card>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+      {filteredEquipment.length === 0 ? (
+        <Card className="p-12 text-center text-slate-400">
+          <Cog className="w-12 h-12 mx-auto text-slate-300 mb-4" />
+          <p className="text-lg font-semibold text-slate-400 mb-2">No equipment found</p>
+          <p className="text-sm">Try adjusting your search or filters.</p>
+        </Card>
+      ) : (
+        <TableCard>
           <table className="w-full">
-            <thead className="bg-slate-900 text-white">
+            <thead className={tableHeadClass}>
               <tr>
-                <th className="p-4 text-left text-sm font-medium">
-                  Tag
-                </th>
-
-                <th className="p-4 text-left text-sm font-medium">
-                  Equipment
-                </th>
-
-                <th className="p-4 text-left text-sm font-medium">
-                  Type
-                </th>
-
-                <th className="p-4 text-left text-sm font-medium">
-                  Location
-                </th>
-
-                <th className="p-4 text-left text-sm font-medium">
-                  Status
-                </th>
-
-                <th className="p-4 text-left text-sm font-medium">
-                  Criticality
-                </th>
-
-                <th className="p-4 text-left text-sm font-medium">
-                  Actions
-                </th>
+                <th className={thClass}>Equipment</th>
+                <th className={thClass}>Type</th>
+                <th className={thClass}>Location</th>
+                <th className={thClass}>Area</th>
+                <th className={thClass}>Status</th>
+                <th className={thClass}>Criticality</th>
+                <th className={thClass}>Actions</th>
               </tr>
             </thead>
-
             <tbody>
-              {filteredEquipment.map(
-                (eq) => (
-                  <tr
-                    key={eq.id}
-                    onClick={() =>
-                      setSelectedEquipment(
-                        eq
-                      )
-                    }
-                    className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition"
-                  >
-                    <td className="p-4 font-medium text-slate-700">
-                      {
-                        eq.tag_number
-                      }
-                    </td>
-
-                    <td className="p-4">
+              {filteredEquipment.map((eq) => (
+                <tr key={eq.id} onClick={() => setSelectedEquipment(eq)} className={`${trClass} cursor-pointer`}>
+                  <td className={tdClass}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 grid place-items-center text-xs font-bold shrink-0">
+                        {initialsOf(eq)}
+                      </div>
                       <div>
-                        <p className="font-semibold text-slate-800">
-                          {eq.name}
-                        </p>
-
-                        <p className="text-xs text-slate-500 mt-1">
-                          {eq.description?.slice(
-                            0,
-                            50
-                          ) ||
-                            "No description"}
-                        </p>
+                        <p className="font-semibold text-slate-800">{eq.name}</p>
+                        <p className="text-xs text-slate-500 mt-0.5 font-mono">{eq.tag_number} · {eq.description?.slice(0, 40) || "No description"}</p>
                       </div>
-                    </td>
-
-                    <td className="p-4">
-                      {
-                        eq.equipment_type
-                      }
-                    </td>
-
-                    <td className="p-4">
-                      {eq.location}
-                    </td>
-
-                    <td className="p-4">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
-                          eq.status
-                        )}`}
-                      >
-                        {eq.status}
-                      </span>
-                    </td>
-
-                    <td className="p-4">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-medium ${getCriticalityColor(
-                          eq.criticality
-                        )}`}
-                      >
-                        {
-                          eq.criticality
-                        }
-                      </span>
-                    </td>
-
-                    <td
-                      className="p-4"
-                      onClick={(e) =>
-                        e.stopPropagation()
-                      }
-                    >
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() =>
-                            handleEdit(eq)
-                          }
-                          className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-500 transition"
-                        >
-                          Edit
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            handleDelete(
-                              eq.id
-                            )
-                          }
-                          className="bg-red-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-red-500 transition"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              )}
-
-              {filteredEquipment.length ===
-                0 && (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="p-10 text-center text-slate-500"
-                  >
-                    No equipment found.
+                    </div>
+                  </td>
+                  <td className={`${tdClass} text-slate-600`}>
+                    {eq.equipment_type ? <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">{eq.equipment_type}</span> : "—"}
+                  </td>
+                  <td className={`${tdClass} text-slate-600`}>{eq.location || "—"}</td>
+                  <td className={`${tdClass} text-xs text-slate-500`}>{areaLabel(eq.area_id)}</td>
+                  <td className={tdClass}><StatusBadge label={eq.status} kind="equipment" /></td>
+                  <td className={tdClass}>
+                    <Badge className={getCriticalityColor(eq.criticality)}>{eq.criticality}</Badge>
+                  </td>
+                  <td className={tdClass} onClick={(e) => e.stopPropagation()}>
+                    <div className="flex gap-2">
+                      {canEditEquipment ? (
+                        <>
+                          <Button size="sm" variant="edit" onClick={() => handleEdit(eq)}>Edit</Button>
+                          <Button size="sm" variant="danger" onClick={() => handleDelete(eq.id)}>Delete</Button>
+                        </>
+                      ) : <span className="text-xs text-slate-400">View only</span>}
+                    </div>
                   </td>
                 </tr>
-              )}
+              ))}
             </tbody>
           </table>
-        </div>
-      </div>
+        </TableCard>
+      )}
     </div>
   );
 }

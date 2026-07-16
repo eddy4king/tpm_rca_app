@@ -4,6 +4,11 @@ import {
   Plus, Wrench, Calendar, User, Clock3, CheckCircle2,
   Pencil, Trash2, Search, Paperclip, X,
 } from "lucide-react";
+import { PriorityBadge } from "../components/indicators";
+import {
+  PageHeader, Card, Input, Select, Textarea, Button, IconButton, Badge,
+  StatCard, Modal, LoadingState, Banner,
+} from "../components/ui";
 
 interface Equipment {
   id: string;
@@ -21,6 +26,7 @@ interface PmSchedule {
   last_completed_at: string | null;
   assigned_to: string | null;
   status: string | null;
+  priority: string | null;
   attachments: string | null;
   created_at: string | null;
 }
@@ -34,11 +40,11 @@ const statusStyles: Record<string, string> = {
 };
 
 const frequencyStyles: Record<string, string> = {
-  Daily: "bg-purple-100 text-purple-700",
-  Weekly: "bg-blue-100 text-blue-700",
-  Monthly: "bg-amber-100 text-amber-700",
-  Quarterly: "bg-orange-100 text-orange-700",
-  Annual: "bg-red-100 text-red-700",
+  Daily: "bg-purple-100 text-purple-700 border-purple-200",
+  Weekly: "bg-blue-100 text-blue-700 border-blue-200",
+  Monthly: "bg-amber-100 text-amber-700 border-amber-200",
+  Quarterly: "bg-orange-100 text-orange-700 border-orange-200",
+  Annual: "bg-red-100 text-red-700 border-red-200",
 };
 
 function getStatus(pm: PmSchedule): string {
@@ -69,6 +75,7 @@ function PMSchedulePage() {
   const [search, setSearch] = useState("");
   const [filterEquipmentId, setFilterEquipmentId] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterPriority, setFilterPriority] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [showCompleteModal, setShowCompleteModal] = useState(false);
   const [editingPm, setEditingPm] = useState<PmSchedule | null>(null);
@@ -81,6 +88,7 @@ function PMSchedulePage() {
     frequency: "Monthly",
     next_due_date: getNextDueDate("Monthly"),
     assigned_to: "",
+    priority: "Medium",
   });
 
   useEffect(() => { loadData(); }, []);
@@ -109,6 +117,7 @@ function PMSchedulePage() {
       frequency: "Monthly",
       next_due_date: getNextDueDate("Monthly"),
       assigned_to: "",
+      priority: "Medium",
     });
     setAttachmentPaths([]);
     setEditingPm(null);
@@ -123,6 +132,7 @@ function PMSchedulePage() {
       frequency: pm.frequency || "Monthly",
       next_due_date: pm.next_due_date || getNextDueDate("Monthly"),
       assigned_to: pm.assigned_to || "",
+      priority: pm.priority || "Medium",
     });
     try {
       setAttachmentPaths(pm.attachments ? JSON.parse(pm.attachments) : []);
@@ -144,6 +154,7 @@ function PMSchedulePage() {
           nextDueDate: form.next_due_date || null,
           assignedTo: form.assigned_to || null,
           attachments: attachmentPaths.length > 0 ? JSON.stringify(attachmentPaths) : null,
+          priority: form.priority,
         },
       });
       resetForm();
@@ -168,6 +179,7 @@ function PMSchedulePage() {
           status: null,
           lastCompletedAt: null,
           attachments: attachmentPaths.length > 0 ? JSON.stringify(attachmentPaths) : null,
+          priority: form.priority,
         },
       });
       resetForm();
@@ -194,6 +206,7 @@ function PMSchedulePage() {
     try {
       await invoke("complete_pm_schedule", {
         id: completingPm.id,
+        completedAt: new Date().toISOString(),
         nextDueDate: nextDue,
       });
       setShowCompleteModal(false);
@@ -225,9 +238,10 @@ function PMSchedulePage() {
       const matchSearch = `${pm.title || ""} ${pm.assigned_to || ""} ${pm.description || ""}`.toLowerCase().includes(search.toLowerCase());
       const matchEquipment = filterEquipmentId ? pm.equipment_id === filterEquipmentId : true;
       const matchStatus = filterStatus ? status === filterStatus : true;
-      return matchSearch && matchEquipment && matchStatus;
+      const matchPriority = filterPriority ? (pm.priority || "Medium") === filterPriority : true;
+      return matchSearch && matchEquipment && matchStatus && matchPriority;
     });
-  }, [schedules, search, filterEquipmentId, filterStatus]);
+  }, [schedules, search, filterEquipmentId, filterStatus, filterPriority]);
 
   const stats = useMemo(() => {
     const total = schedules.length;
@@ -237,82 +251,74 @@ function PMSchedulePage() {
     return { total, overdue, completed, pending };
   }, [schedules]);
 
-  if (loading) return <div className="h-screen flex items-center justify-center text-slate-500">Loading PM Scheduler...</div>;
-  if (error) return <div className="p-8 text-red-500">{error}</div>;
+  if (loading) return <LoadingState label="Loading PM Scheduler..." />;
+  if (error) return <Banner tone="error">{error}</Banner>;
 
   return (
-    <div className="flex flex-col bg-slate-100 text-slate-800" style={{ height: "calc(100vh - 80px)" }}>
+    <div className="flex flex-col bg-slate-50 text-slate-800" style={{ height: "100%" }}>
 
       {/* HEADER */}
       <div className="bg-white border-b border-slate-200 px-6 py-5">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <Wrench className="w-6 h-6 text-blue-600" />
-              <h1 className="text-2xl font-bold">PM Scheduler</h1>
-            </div>
-            <p className="text-sm text-slate-500 mt-1">Preventive Maintenance Schedule Management</p>
-          </div>
-          <button
-            onClick={() => { resetForm(); setShowForm(true); }}
-            className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl font-medium flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" /> New PM Task
-          </button>
-        </div>
+        <PageHeader
+          title="PM Scheduler"
+          subtitle="Preventive Maintenance Schedule Management"
+          actions={
+            <Button onClick={() => { resetForm(); setShowForm(true); }}>
+              <Plus className="w-4 h-4" /> New PM Task
+            </Button>
+          }
+        />
 
         {/* STATS */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Total Tasks</p>
-            <h2 className="text-3xl font-bold mt-1">{stats.total}</h2>
-          </div>
-          <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
-            <p className="text-xs text-red-600">Overdue</p>
-            <h2 className="text-3xl font-bold mt-1 text-red-700">{stats.overdue}</h2>
-          </div>
-          <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
-            <p className="text-xs text-blue-600">Pending</p>
-            <h2 className="text-3xl font-bold mt-1 text-blue-700">{stats.pending}</h2>
-          </div>
-          <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
-            <p className="text-xs text-emerald-600">Completed</p>
-            <h2 className="text-3xl font-bold mt-1 text-emerald-700">{stats.completed}</h2>
-          </div>
+          <StatCard label="Total Tasks" value={<span className="text-slate-900">{stats.total}</span>} />
+          <StatCard label="Overdue" value={<span className="text-red-700">{stats.overdue}</span>} />
+          <StatCard label="Pending" value={<span className="text-blue-700">{stats.pending}</span>} />
+          <StatCard label="Completed" value={<span className="text-emerald-700">{stats.completed}</span>} />
         </div>
 
         {/* FILTERS */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
-            <input
-              placeholder="Search tasks..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full border border-slate-300 rounded-xl pl-10 pr-4 py-3"
-            />
+        <Card className="mt-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
+              <Input
+                placeholder="Search tasks..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            <Select
+              value={filterEquipmentId}
+              onChange={e => setFilterEquipmentId(e.target.value)}
+            >
+              <option value="">All Equipment</option>
+              {equipment.map(eq => (
+                <option key={eq.id} value={eq.id}>{eq.tag_number} — {eq.name}</option>
+              ))}
+            </Select>
+            <Select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+            >
+              <option value="">All Statuses</option>
+              <option value="Pending">Pending</option>
+              <option value="Overdue">Overdue</option>
+              <option value="Completed">Completed</option>
+            </Select>
+            <Select
+              value={filterPriority}
+              onChange={e => setFilterPriority(e.target.value)}
+            >
+              <option value="">All Priorities</option>
+              <option value="Critical">Critical</option>
+              <option value="High">High</option>
+              <option value="Medium">Medium</option>
+              <option value="Low">Low</option>
+            </Select>
           </div>
-          <select
-            value={filterEquipmentId}
-            onChange={e => setFilterEquipmentId(e.target.value)}
-            className="border border-slate-300 rounded-xl px-4 py-3 bg-white"
-          >
-            <option value="">All Equipment</option>
-            {equipment.map(eq => (
-              <option key={eq.id} value={eq.id}>{eq.tag_number} — {eq.name}</option>
-            ))}
-          </select>
-          <select
-            value={filterStatus}
-            onChange={e => setFilterStatus(e.target.value)}
-            className="border border-slate-300 rounded-xl px-4 py-3 bg-white"
-          >
-            <option value="">All Statuses</option>
-            <option value="Pending">Pending</option>
-            <option value="Overdue">Overdue</option>
-            <option value="Completed">Completed</option>
-          </select>
-        </div>
+        </Card>
       </div>
 
       {/* CONTENT */}
@@ -333,32 +339,34 @@ function PMSchedulePage() {
               try { attachments = pm.attachments ? JSON.parse(pm.attachments) : []; } catch { attachments = []; }
 
               return (
-                <div key={pm.id} className={`bg-white border rounded-3xl p-5 shadow-sm hover:shadow-md transition ${status === "Overdue" ? "border-red-200" : "border-slate-200"}`}>
+                <Card
+                  key={pm.id}
+                  className={`hover:shadow-md transition-shadow duration-200 border-l-4 ${status === "Overdue" ? "border-l-red-500" : "border-l-slate-200"}`}
+                >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h2 className="text-lg font-bold text-slate-800">{pm.title}</h2>
-                      </div>
+                      <h2 className="text-lg font-bold text-slate-900">{pm.title}</h2>
                       <p className="text-xs text-slate-400 mb-2">{getEquipmentName(pm.equipment_id)}</p>
                       <p className="text-sm text-slate-500 line-clamp-2">{pm.description || "No description"}</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => openEdit(pm)} className="p-2 rounded-lg hover:bg-slate-100">
-                        <Pencil className="w-4 h-4 text-blue-600" />
-                      </button>
-                      <button onClick={() => handleDelete(pm.id)} className="p-2 rounded-lg hover:bg-red-50">
-                        <Trash2 className="w-4 h-4 text-red-600" />
-                      </button>
+                      <IconButton variant="edit" label="Edit" onClick={() => openEdit(pm)}>
+                        <Pencil className="w-4 h-4" />
+                      </IconButton>
+                      <IconButton variant="danger" label="Delete" onClick={() => handleDelete(pm.id)}>
+                        <Trash2 className="w-4 h-4" />
+                      </IconButton>
                     </div>
                   </div>
 
                   <div className="flex flex-wrap gap-2 mt-4">
-                    <span className={`px-3 py-1 rounded-full border text-xs font-semibold ${statusStyles[status] || "bg-slate-100 text-slate-700"}`}>
+                    <Badge className={statusStyles[status] || "bg-slate-100 text-slate-700 border-slate-200"}>
                       {status === "Overdue" && "⚠ "}{status}
-                    </span>
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${frequencyStyles[pm.frequency || ""] || "bg-slate-100 text-slate-700"}`}>
+                    </Badge>
+                    <Badge className={frequencyStyles[pm.frequency || ""] || "bg-slate-100 text-slate-700 border-slate-200"}>
                       {pm.frequency}
-                    </span>
+                    </Badge>
+                    <PriorityBadge priority={pm.priority} />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 mt-4">
@@ -366,7 +374,7 @@ function PMSchedulePage() {
                       <div className="flex items-center gap-1 text-xs text-slate-400 uppercase mb-1">
                         <Calendar className="w-3 h-3" /> Next Due
                       </div>
-                      <p className="text-sm font-semibold text-slate-700">
+                      <p className="text-sm font-semibold text-slate-800">
                         {pm.next_due_date ? new Date(pm.next_due_date).toLocaleDateString() : "—"}
                       </p>
                     </div>
@@ -374,7 +382,7 @@ function PMSchedulePage() {
                       <div className="flex items-center gap-1 text-xs text-slate-400 uppercase mb-1">
                         <Clock3 className="w-3 h-3" /> Last Done
                       </div>
-                      <p className="text-sm font-semibold text-slate-700">
+                      <p className="text-sm font-semibold text-slate-800">
                         {pm.last_completed_at ? new Date(pm.last_completed_at).toLocaleDateString() : "Never"}
                       </p>
                     </div>
@@ -401,14 +409,15 @@ function PMSchedulePage() {
                   )}
 
                   {status !== "Completed" && (
-                    <button
+                    <Button
+                      variant="success"
+                      className="w-full mt-4"
                       onClick={() => { setCompletingPm(pm); setShowCompleteModal(true); }}
-                      className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-medium flex items-center justify-center gap-2 text-sm"
                     >
                       <CheckCircle2 className="w-4 h-4" /> Mark as Complete
-                    </button>
+                    </Button>
                   )}
-                </div>
+                </Card>
               );
             })}
           </div>
@@ -417,131 +426,153 @@ function PMSchedulePage() {
 
       {/* CREATE / EDIT MODAL */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold mb-6">{editingPm ? "Edit PM Task" : "New PM Task"}</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <select
-                value={form.equipment_id}
-                onChange={e => setForm({ ...form, equipment_id: e.target.value })}
-                className="border border-slate-300 rounded-xl px-4 py-3 md:col-span-2"
-              >
-                <option value="">Select Equipment *</option>
-                {equipment.map(eq => (
-                  <option key={eq.id} value={eq.id}>{eq.tag_number} — {eq.name}</option>
-                ))}
-              </select>
-              <input
+        <Modal
+          title={editingPm ? "Edit PM Task" : "New PM Task"}
+          onClose={() => { setShowForm(false); resetForm(); }}
+          maxWidth="max-w-2xl"
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Select
+              value={form.equipment_id}
+              onChange={e => setForm({ ...form, equipment_id: e.target.value })}
+              className="md:col-span-2"
+            >
+              <option value="">Select Equipment *</option>
+              {equipment.map(eq => (
+                <option key={eq.id} value={eq.id}>{eq.tag_number} — {eq.name}</option>
+              ))}
+            </Select>
+            <div className="md:col-span-2">
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Task Title *</label>
+              <Input
                 placeholder="Task Title *"
                 value={form.title}
                 onChange={e => setForm({ ...form, title: e.target.value })}
-                className="border border-slate-300 rounded-xl px-4 py-3 md:col-span-2"
               />
-              <select
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Frequency</label>
+              <Select
                 value={form.frequency}
                 onChange={e => setForm({ ...form, frequency: e.target.value, next_due_date: getNextDueDate(e.target.value) })}
-                className="border border-slate-300 rounded-xl px-4 py-3"
               >
                 {frequencyOptions.map(f => (
                   <option key={f} value={f}>{f}</option>
                 ))}
-              </select>
-              <input
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Next Due Date</label>
+              <Input
                 type="date"
                 value={form.next_due_date}
                 onChange={e => setForm({ ...form, next_due_date: e.target.value })}
-                className="border border-slate-300 rounded-xl px-4 py-3"
               />
-              <input
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Priority</label>
+              <Select
+                value={form.priority}
+                onChange={e => setForm({ ...form, priority: e.target.value })}
+              >
+                <option value="Critical">Critical Priority</option>
+                <option value="High">High Priority</option>
+                <option value="Medium">Medium Priority</option>
+                <option value="Low">Low Priority</option>
+              </Select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Assigned To</label>
+              <Input
                 placeholder="Assigned To"
                 value={form.assigned_to}
                 onChange={e => setForm({ ...form, assigned_to: e.target.value })}
-                className="border border-slate-300 rounded-xl px-4 py-3 md:col-span-2"
               />
-              <textarea
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Description (optional)</label>
+              <Textarea
                 placeholder="Description (optional)"
                 value={form.description}
                 onChange={e => setForm({ ...form, description: e.target.value })}
-                className="w-full border border-slate-300 rounded-xl px-4 py-3 h-28 resize-none md:col-span-2"
+                className="h-28 resize-none"
               />
             </div>
-
-            {/* ATTACHMENTS */}
-            <div className="mt-4">
-              <label className="text-sm font-semibold text-slate-600 block mb-2">
-                Attachments (Images / Videos)
-              </label>
-              <label className="flex items-center gap-2 border-2 border-dashed border-slate-300 rounded-xl p-4 cursor-pointer hover:border-blue-400 transition">
-                <Paperclip className="w-5 h-5 text-slate-400" />
-                <span className="text-sm text-slate-500">Click to attach files</span>
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*,video/*"
-                  className="hidden"
-                  onChange={handleFileInput}
-                />
-              </label>
-              {attachmentPaths.length > 0 && (
-                <div className="flex flex-wrap gap-2 mt-3">
-                  {attachmentPaths.map((a, i) => (
-                    <div key={i} className="flex items-center gap-1 bg-slate-100 text-slate-700 text-xs px-3 py-1.5 rounded-lg">
-                      <span>{a}</span>
-                      <button onClick={() => setAttachmentPaths(prev => prev.filter((_, idx) => idx !== i))}>
-                        <X className="w-3 h-3 text-slate-400 hover:text-red-500" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => { setShowForm(false); resetForm(); }} className="px-5 py-3 rounded-xl border border-slate-300 hover:bg-slate-50">
-                Cancel
-              </button>
-              <button
-                onClick={editingPm ? handleUpdate : handleCreate}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl font-medium"
-              >
-                {editingPm ? "Update Task" : "Create Task"}
-              </button>
-            </div>
           </div>
-        </div>
+
+          {/* ATTACHMENTS */}
+          <div className="mt-4">
+            <label className="text-sm font-semibold text-slate-600 block mb-2">
+              Attachments (Images / Videos)
+            </label>
+            <label className="flex items-center gap-2 border-2 border-dashed border-slate-300 rounded-xl p-4 cursor-pointer hover:border-blue-400 transition-colors">
+              <Paperclip className="w-5 h-5 text-slate-400" />
+              <span className="text-sm text-slate-500">Click to attach files</span>
+              <input
+                type="file"
+                multiple
+                accept="image/*,video/*"
+                className="hidden"
+                onChange={handleFileInput}
+              />
+            </label>
+            {attachmentPaths.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                {attachmentPaths.map((a, i) => (
+                  <div key={i} className="flex items-center gap-1 bg-slate-100 text-slate-700 text-xs px-3 py-1.5 rounded-lg">
+                    <span>{a}</span>
+                    <button onClick={() => setAttachmentPaths(prev => prev.filter((_, idx) => idx !== i))} aria-label="Remove attachment">
+                      <X className="w-3 h-3 text-slate-400 hover:text-red-500" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6">
+            <Button variant="secondary" onClick={() => { setShowForm(false); resetForm(); }}>
+              Cancel
+            </Button>
+            <Button onClick={editingPm ? handleUpdate : handleCreate}>
+              {editingPm ? "Update Task" : "Create Task"}
+            </Button>
+          </div>
+        </Modal>
       )}
 
       {/* COMPLETE MODAL */}
       {showCompleteModal && completingPm && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="bg-emerald-100 p-3 rounded-2xl">
-                <CheckCircle2 className="w-6 h-6 text-emerald-600" />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold">Mark as Complete</h2>
-                <p className="text-sm text-slate-500">This will log completion and schedule the next due date.</p>
-              </div>
+        <Modal
+          title="Mark as Complete"
+          onClose={() => { setShowCompleteModal(false); setCompletingPm(null); }}
+          maxWidth="max-w-md"
+        >
+          <div className="flex items-center gap-3 mb-4">
+            <div className="bg-emerald-100 p-3 rounded-2xl">
+              <CheckCircle2 className="w-6 h-6 text-emerald-600" />
             </div>
-            <div className="bg-slate-50 rounded-2xl p-4 mb-5">
-              <p className="font-semibold text-slate-700">{completingPm.title}</p>
-              <p className="text-sm text-slate-500 mt-1">{getEquipmentName(completingPm.equipment_id)}</p>
-              <div className="flex items-center gap-2 mt-3 text-sm text-slate-600">
-                <Calendar className="w-4 h-4" />
-                <span>Next due: <strong>{getNextDueDate(completingPm.frequency || "Monthly")}</strong></span>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => { setShowCompleteModal(false); setCompletingPm(null); }} className="flex-1 py-3 rounded-xl border border-slate-300 hover:bg-slate-50">
-                Cancel
-              </button>
-              <button onClick={handleComplete} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-medium">
-                Confirm Complete
-              </button>
+            <div>
+              <p className="text-sm text-slate-500">This will log completion and schedule the next due date.</p>
             </div>
           </div>
-        </div>
+          <div className="bg-slate-50 rounded-2xl p-4 mb-5">
+            <p className="font-semibold text-slate-800">{completingPm.title}</p>
+            <p className="text-sm text-slate-500 mt-1">{getEquipmentName(completingPm.equipment_id)}</p>
+            <div className="flex items-center gap-2 mt-3 text-sm text-slate-600">
+              <Calendar className="w-4 h-4" />
+              <span>Next due: <strong>{getNextDueDate(completingPm.frequency || "Monthly")}</strong></span>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => { setShowCompleteModal(false); setCompletingPm(null); }}>
+              Cancel
+            </Button>
+            <Button variant="success" className="flex-1" onClick={handleComplete}>
+              Confirm Complete
+            </Button>
+          </div>
+        </Modal>
       )}
     </div>
   );

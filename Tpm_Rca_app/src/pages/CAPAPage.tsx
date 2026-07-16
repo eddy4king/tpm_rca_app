@@ -1,8 +1,14 @@
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  ClipboardCheck, Plus, Pencil, Trash2, User, CalendarDays, Search
+  ClipboardCheck, Plus, Pencil, Trash2, User, CalendarDays, Search, Download
 } from "lucide-react";
+import { exportToCsv } from "../lib/export";
+import { useToast } from "../context/ToastContext";
+import {
+  PageHeader, Card, Input, Select, Textarea, Button, IconButton, Badge,
+  StatCard, Modal, LoadingState, Banner,
+} from "../components/ui";
 
 interface Equipment {
   id: string;
@@ -36,13 +42,21 @@ const statusStyles: Record<string, string> = {
 };
 
 const priorityStyles: Record<string, string> = {
-  Low: "bg-slate-100 text-slate-700",
-  Medium: "bg-blue-100 text-blue-700",
-  High: "bg-orange-100 text-orange-700",
-  Critical: "bg-red-100 text-red-700",
+  Low: "bg-slate-100 text-slate-600 border-slate-200",
+  Medium: "bg-blue-100 text-blue-700 border-blue-200",
+  High: "bg-orange-100 text-orange-700 border-orange-200",
+  Critical: "bg-red-100 text-red-700 border-red-200",
+};
+
+const priorityBorder: Record<string, string> = {
+  Low: "border-l-slate-400",
+  Medium: "border-l-blue-500",
+  High: "border-l-orange-500",
+  Critical: "border-l-red-500",
 };
 
 function CAPAPage() {
+  const toast = useToast();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [investigations, setInvestigations] = useState<Investigation[]>([]);
   const [capas, setCapas] = useState<CAPA[]>([]);
@@ -204,82 +218,86 @@ function CAPAPage() {
   const progressCount = capas.filter(c => c.status === "In Progress").length;
   const closedCount = capas.filter(c => c.status === "Closed").length;
 
-  if (loading) return <div className="h-screen flex items-center justify-center text-slate-500">Loading CAPA Workspace...</div>;
-  if (error) return <div className="p-8 text-red-500">{error}</div>;
+  if (loading) return <LoadingState label="Loading CAPA Workspace..." />;
+  if (error) return <Banner tone="error">{error}</Banner>;
 
   return (
-    <div className="flex flex-col bg-slate-100 text-slate-800" style={{ height: "calc(100vh - 80px)" }}>
+    <div className="flex flex-col bg-slate-50 text-slate-800" style={{ height: "100%" }}>
 
       {/* HEADER */}
       <div className="bg-white border-b border-slate-200 px-6 py-5">
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <ClipboardCheck className="w-6 h-6 text-blue-600" />
-              <h1 className="text-2xl font-bold">CAPA Management</h1>
+        <PageHeader
+          title="CAPA Management"
+          subtitle="Corrective And Preventive Action Tracking System"
+          actions={
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                disabled={!filteredCapas.length}
+                onClick={() => {
+                  exportToCsv("capa", filteredCapas, [
+                    { key: "title", label: "Title" },
+                    { key: "owner", label: "Owner" },
+                    { key: "status", label: "Status" },
+                    { key: "priority", label: "Priority" },
+                    { key: "due_date", label: "Due Date" },
+                    { key: "description", label: "Description" },
+                    { key: "created_at", label: "Created At" },
+                  ]);
+                  toast.success(`Exported ${filteredCapas.length} CAPA records`);
+                }}
+              >
+                <Download className="w-4 h-4" /> Export CSV
+              </Button>
+              <Button
+                onClick={() => { resetForm(); setShowCreateModal(true); }}
+                disabled={!selectedInvestigationId}
+              >
+                <Plus className="w-4 h-4" /> New CAPA
+              </Button>
             </div>
-            <p className="text-sm text-slate-500 mt-1">Corrective And Preventive Action Tracking System</p>
+          }
+        />
+
+        <Card className="mt-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Select
+              value={selectedEquipmentId}
+              onChange={e => setSelectedEquipmentId(e.target.value)}
+            >
+              <option value="">Select Equipment</option>
+              {equipment.map(eq => (
+                <option key={eq.id} value={eq.id}>{eq.tag_number} — {eq.name}</option>
+              ))}
+            </Select>
+
+            <Select
+              value={selectedInvestigationId}
+              onChange={e => setSelectedInvestigationId(e.target.value)}
+            >
+              <option value="">Select Investigation</option>
+              {investigations.map(inv => (
+                <option key={inv.id} value={inv.id}>{inv.title}</option>
+              ))}
+            </Select>
+
+            <div className="relative">
+              <Search className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
+              <Input
+                placeholder="Search CAPAs..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="pl-10"
+              />
+            </div>
           </div>
-          <button
-            onClick={() => { resetForm(); setShowCreateModal(true); }}
-            disabled={!selectedInvestigationId}
-            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white px-5 py-3 rounded-xl font-medium flex items-center gap-2"
-          >
-            <Plus className="w-4 h-4" /> New CAPA
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
-          <select
-            value={selectedEquipmentId}
-            onChange={e => setSelectedEquipmentId(e.target.value)}
-            className="border border-slate-300 rounded-xl px-4 py-3 bg-white"
-          >
-            <option value="">Select Equipment</option>
-            {equipment.map(eq => (
-              <option key={eq.id} value={eq.id}>{eq.tag_number} — {eq.name}</option>
-            ))}
-          </select>
-
-          <select
-            value={selectedInvestigationId}
-            onChange={e => setSelectedInvestigationId(e.target.value)}
-            className="border border-slate-300 rounded-xl px-4 py-3 bg-white"
-          >
-            <option value="">Select Investigation</option>
-            {investigations.map(inv => (
-              <option key={inv.id} value={inv.id}>{inv.title}</option>
-            ))}
-          </select>
-
-          <div className="relative">
-            <Search className="absolute left-3 top-3.5 w-4 h-4 text-slate-400" />
-            <input
-              placeholder="Search CAPAs..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="w-full border border-slate-300 rounded-xl pl-10 pr-4 py-3"
-            />
-          </div>
-        </div>
+        </Card>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-5">
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Total CAPAs</p>
-            <h2 className="text-3xl font-bold mt-2">{capas.length}</h2>
-          </div>
-          <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
-            <p className="text-xs text-red-600">Open</p>
-            <h2 className="text-3xl font-bold mt-2 text-red-700">{openCount}</h2>
-          </div>
-          <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
-            <p className="text-xs text-amber-600">In Progress</p>
-            <h2 className="text-3xl font-bold mt-2 text-amber-700">{progressCount}</h2>
-          </div>
-          <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
-            <p className="text-xs text-emerald-600">Closed</p>
-            <h2 className="text-3xl font-bold mt-2 text-emerald-700">{closedCount}</h2>
-          </div>
+          <StatCard label="Total CAPAs" value={<span className="text-slate-900">{capas.length}</span>} />
+          <StatCard label="Open" value={<span className="text-red-700">{openCount}</span>} />
+          <StatCard label="In Progress" value={<span className="text-amber-700">{progressCount}</span>} />
+          <StatCard label="Closed" value={<span className="text-emerald-700">{closedCount}</span>} />
         </div>
       </div>
 
@@ -297,126 +315,133 @@ function CAPAPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            {filteredCapas.map(capa => (
-              <div key={capa.id} className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm hover:shadow-md transition">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1">
-                    <h2 className="text-lg font-bold text-slate-800">{capa.title}</h2>
-                    <p className="text-sm text-slate-500 mt-2 leading-relaxed line-clamp-2">
-                      {capa.description || "No description provided"}
-                    </p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => openEditModal(capa)} className="p-2 rounded-lg hover:bg-slate-100">
-                      <Pencil className="w-4 h-4 text-blue-600" />
-                    </button>
-                    <button onClick={() => handleDeleteCAPA(capa.id)} className="p-2 rounded-lg hover:bg-red-50">
-                      <Trash2 className="w-4 h-4 text-red-600" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2 mt-4">
-                  <div className={`px-3 py-1 rounded-full border text-xs font-semibold ${statusStyles[capa.status || "Open"] || "bg-slate-100 text-slate-700"}`}>
-                    {capa.status || "Open"}
-                  </div>
-                  <div className={`px-3 py-1 rounded-full text-xs font-semibold ${priorityStyles[capa.priority || "Medium"] || "bg-slate-100 text-slate-700"}`}>
-                    {capa.priority || "Medium"} Priority
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4 mt-5">
-                  <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-                    <div className="flex items-center gap-2 text-slate-500 text-xs uppercase">
-                      <User className="w-3.5 h-3.5" /> Owner
+            {filteredCapas.map(capa => {
+              const isOverdue = !!capa.due_date && capa.status !== "Closed" && new Date(capa.due_date) < new Date();
+              return (
+                <Card key={capa.id} className={`border-l-4 ${priorityBorder[capa.priority || "Medium"]} hover:shadow-md transition-shadow duration-200`}>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <h2 className="text-lg font-bold text-slate-900">{capa.title}</h2>
+                      <p className="text-sm text-slate-500 mt-2 leading-relaxed line-clamp-2">
+                        {capa.description || "No description provided"}
+                      </p>
                     </div>
-                    <p className="font-medium mt-2 text-sm">{capa.owner || "Unassigned"}</p>
-                  </div>
-                  <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
-                    <div className="flex items-center gap-2 text-slate-500 text-xs uppercase">
-                      <CalendarDays className="w-3.5 h-3.5" /> Due Date
+                    <div className="flex gap-2">
+                      <IconButton variant="edit" label="Edit" onClick={() => openEditModal(capa)}>
+                        <Pencil className="w-4 h-4" />
+                      </IconButton>
+                      <IconButton variant="danger" label="Delete" onClick={() => handleDeleteCAPA(capa.id)}>
+                        <Trash2 className="w-4 h-4" />
+                      </IconButton>
                     </div>
-                    <p className="font-medium mt-2 text-sm">
-                      {capa.due_date ? new Date(capa.due_date).toLocaleDateString() : "No due date"}
-                    </p>
                   </div>
-                </div>
-              </div>
-            ))}
+
+                  <div className="flex flex-wrap gap-2 mt-4">
+                    <Badge className={statusStyles[capa.status || "Open"] || "bg-slate-100 text-slate-700 border-slate-200"}>
+                      {capa.status || "Open"}
+                    </Badge>
+                    <Badge className={priorityStyles[capa.priority || "Medium"] || "bg-slate-100 text-slate-700 border-slate-200"}>
+                      {capa.priority || "Medium"} Priority
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 mt-5">
+                    <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                      <div className="flex items-center gap-2 text-slate-500 text-xs uppercase">
+                        <User className="w-3.5 h-3.5" /> Owner
+                      </div>
+                      <p className="font-medium mt-2 text-sm text-slate-800">{capa.owner || "Unassigned"}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                      <div className="flex items-center gap-2 text-slate-500 text-xs uppercase">
+                        <CalendarDays className="w-3.5 h-3.5" /> Due Date
+                      </div>
+                      <p className={`font-medium mt-2 text-sm ${isOverdue ? "text-red-600" : "text-slate-800"}`}>
+                        {capa.due_date ? new Date(capa.due_date).toLocaleDateString() : "No due date"}
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
           </div>
         )}
       </div>
 
       {/* MODAL */}
       {(showCreateModal || showEditModal) && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl p-6">
-            <h2 className="text-2xl font-bold mb-6">
-              {showEditModal ? "Edit CAPA" : "Create New CAPA"}
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <input
+        <Modal
+          title={showEditModal ? "Edit CAPA" : "Create New CAPA"}
+          onClose={() => { setShowCreateModal(false); setShowEditModal(false); resetForm(); }}
+          maxWidth="max-w-2xl"
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">CAPA Title *</label>
+              <Input
                 placeholder="CAPA Title *"
                 value={form.title}
                 onChange={e => setForm({ ...form, title: e.target.value })}
-                className="border border-slate-300 rounded-xl px-4 py-3"
               />
-              <input
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Owner</label>
+              <Input
                 placeholder="Owner"
                 value={form.owner}
                 onChange={e => setForm({ ...form, owner: e.target.value })}
-                className="border border-slate-300 rounded-xl px-4 py-3"
               />
-              <select
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Priority</label>
+              <Select
                 value={form.priority}
                 onChange={e => setForm({ ...form, priority: e.target.value })}
-                className="border border-slate-300 rounded-xl px-4 py-3"
               >
                 <option value="Low">Low Priority</option>
                 <option value="Medium">Medium Priority</option>
                 <option value="High">High Priority</option>
                 <option value="Critical">Critical Priority</option>
-              </select>
-              <input
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-slate-600 block mb-1.5">Due Date</label>
+              <Input
                 type="date"
                 value={form.due_date}
                 onChange={e => setForm({ ...form, due_date: e.target.value })}
-                className="border border-slate-300 rounded-xl px-4 py-3"
               />
-              {showEditModal && (
-                <select
-                  value={form.status}
-                  onChange={e => setForm({ ...form, status: e.target.value })}
-                  className="border border-slate-300 rounded-xl px-4 py-3 md:col-span-2"
-                >
-                  <option value="Open">Open</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Closed">Closed</option>
-                </select>
-              )}
             </div>
-            <textarea
+            {showEditModal && (
+              <Select
+                value={form.status}
+                onChange={e => setForm({ ...form, status: e.target.value })}
+                className="md:col-span-2"
+              >
+                <option value="Open">Open</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Closed">Closed</option>
+              </Select>
+            )}
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-600 block mb-1.5 mt-4">Detailed Description</label>
+            <Textarea
               placeholder="Detailed Description"
               value={form.description}
               onChange={e => setForm({ ...form, description: e.target.value })}
-              className="w-full border border-slate-300 rounded-xl px-4 py-3 h-32 resize-none mt-4"
+              className="h-32 resize-none"
             />
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => { setShowCreateModal(false); setShowEditModal(false); resetForm(); }}
-                className="px-5 py-3 rounded-xl border border-slate-300 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={showEditModal ? handleUpdateCAPA : handleCreateCAPA}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl font-medium"
-              >
-                {showEditModal ? "Update CAPA" : "Create CAPA"}
-              </button>
-            </div>
           </div>
-        </div>
+          <div className="flex justify-end gap-3 mt-6">
+            <Button variant="secondary" onClick={() => { setShowCreateModal(false); setShowEditModal(false); resetForm(); }}>
+              Cancel
+            </Button>
+            <Button onClick={showEditModal ? handleUpdateCAPA : handleCreateCAPA}>
+              {showEditModal ? "Update CAPA" : "Create CAPA"}
+            </Button>
+          </div>
+        </Modal>
       )}
     </div>
   );

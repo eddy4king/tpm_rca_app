@@ -24,5 +24,5 @@ pub async fn has_permission(pool: &SqlitePool, user_id: &str, required_role: &st
     .map_err(|e| e.to_string())?;
 
     let user_role = role.unwrap_or_else(|| "Viewer".to_string());
-    Ok(crate::policy::permits(&user_role, crate::policy::Role::from(required_role)))
+    Ok(crate::policy::permits(&user_role, required_role))
 }

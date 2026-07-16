@@ -12,8 +12,53 @@ pub struct Equipment {
     pub status: Option<String>,
     pub equipment_type: Option<String>,
     pub parent_id: Option<String>,
+    pub area_id: Option<String>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct Plant {
+    pub id: String,
+    pub name: Option<String>,
+    pub code: Option<String>,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct Area {
+    pub id: String,
+    pub plant_id: String,
+    pub name: Option<String>,
+    pub code: Option<String>,
+    pub description: Option<String>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct AuditLog {
+    pub id: String,
+    pub entity_type: String,
+    pub entity_id: Option<String>,
+    pub action: String,
+    pub description: Option<String>,
+    pub performed_by: Option<String>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct TimelineEvent {
+    pub id: String,
+    pub event_type: String,
+    pub title: String,
+    pub equipment_id: Option<String>,
+    pub equipment_name: Option<String>,
+    pub timestamp: Option<String>,
+    pub status: Option<String>,
+    pub priority: Option<String>,
+    pub meta: Option<String>,
 }
 
 
@@ -84,6 +129,7 @@ pub struct PmSchedule {
     pub last_completed_at: Option<String>,
     pub assigned_to: Option<String>,
     pub status: Option<String>,
+    pub priority: Option<String>,
     pub attachments: Option<String>,
     pub created_at: Option<String>,
 }
@@ -120,6 +166,8 @@ pub struct User {
     pub is_active: i64,
     pub created_at: Option<String>,
     pub last_login_at: Option<String>,
+    pub recovery_question: Option<String>,
+    pub recovery_answer_hash: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]

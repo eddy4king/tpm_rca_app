@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import projectImage from "../project-image.png";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { useRole } from "./context/RoleContext";
 import EquipmentPage from "./pages/EquipmentPage";
@@ -7,15 +8,20 @@ import RcaPage from "./pages/RcaPage";
 import CAPAPage from "./pages/CAPAPage";
 import DashboardPage from "./pages/DashboardPage";
 import PMSchedulePage from "./pages/PMSchedulePage";
+import HierarchyPage from "./pages/HierarchyPage";
+import TasksPage from "./pages/TasksPage";
+import TimelinePage from "./pages/TimelinePage";
+import AuditPage from "./pages/AuditPage";
 import SyncPage from "./pages/SyncPage";
+
 import UsersPage from "./pages/UsersPage";
 import LoginPage from "./pages/LoginPage";
-import { LogOut, User } from "lucide-react";
+import Sidebar from "./components/Sidebar";
 
-type Page = "equipment" | "downtime" | "rca" | "capa" | "dashboard" | "pm" | "sync" | "users";
+type Page = "equipment" | "downtime" | "rca" | "capa" | "dashboard" | "pm" | "hierarchy" | "tasks" | "timeline" | "audit" | "sync" | "users";
 
 function AppInner() {
-  const { user, logout, isAdmin, isLoading } = useAuth();
+  const { user, isAdmin, isLoading } = useAuth();
   const { role, loading: roleLoading } = useRole();
   const [activePage, setActivePage] = useState<Page>("dashboard");
 
@@ -29,8 +35,13 @@ function AppInner() {
   }, [activePage]);
 
   if (isLoading || roleLoading) return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-      Loading…
+    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-8">
+      <img
+        src={projectImage}
+        alt="TPM-RCA Pro"
+        className="w-48 h-48 object-contain rounded-3xl shadow-2xl"
+      />
+      <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin" />
     </div>
   );
 
@@ -40,10 +51,14 @@ function AppInner() {
   const baseNav = [
     { key: "dashboard", label: "Dashboard" },
     { key: "equipment", label: "Equipment" },
+    { key: "hierarchy", label: "Hierarchy" },
     { key: "downtime", label: "Downtime" },
     { key: "rca", label: "RCA" },
     { key: "capa", label: "CAPA" },
     { key: "pm", label: "PM Scheduler" },
+    { key: "tasks", label: "Tasks" },
+    { key: "timeline", label: "Timeline" },
+    { key: "audit", label: "Audit" },
     { key: "sync", label: "Sync" },
   ] as const;
 
@@ -56,51 +71,25 @@ function AppInner() {
   const navItems = isAdmin ? [...permittedNav, { key: "users", label: "Users" }] : permittedNav;
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
-      <nav className="bg-slate-800 text-white px-6 py-3 flex items-center gap-4 border-b border-slate-700">
-        <h1 className="text-xl font-bold tracking-tight mr-2">TPM-RCA Pro</h1>
-        <div className="flex gap-1 flex-1 flex-wrap">
-          {navItems.map(({ key, label }) => (
-            <button
-              key={key}
-              onClick={() => setActivePage(key as Page)}
-              className={`px-4 py-2 rounded-xl font-medium transition-all text-sm ${
-                activePage === key
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "hover:bg-slate-700 text-slate-300"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-3 ml-auto">
-          <div className="flex items-center gap-2 bg-slate-700 rounded-xl px-3 py-2">
-            <User className="w-4 h-4 text-slate-300" />
-            <span className="text-sm text-slate-200">{user.username}</span>
-            <span className={`text-xs px-2 py-0.5 rounded-full ${
-              user.role === "Admin" ? "bg-red-500" :
-              user.role === "Engineer" ? "bg-blue-500" :
-              user.role === "Technician" ? "bg-amber-500" : "bg-slate-500"
-            } text-white`}>{user.role}</span>
-          </div>
-          <button
-            onClick={logout}
-            className="flex items-center gap-1.5 text-slate-300 hover:text-white text-sm px-3 py-2 rounded-xl hover:bg-slate-700"
-          >
-            <LogOut className="w-4 h-4" /> Logout
-          </button>
-        </div>
-      </nav>
-
-      <main className="flex-1 overflow-hidden">
-        {activePage === "dashboard" && <DashboardPage />}
+    <div className="h-screen flex bg-slate-50 text-slate-800">
+      <Sidebar
+        navItems={navItems as { key: string; label: string }[]}
+        activePage={activePage}
+        onNavigate={(p) => setActivePage(p as Page)}
+      />
+      <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        {activePage === "dashboard" && <DashboardPage onNavigate={(p) => setActivePage(p as Page)} />}
         {activePage === "equipment" && <EquipmentPage />}
         {activePage === "downtime" && <DowntimePage />}
         {activePage === "rca" && <RcaPage />}
         {activePage === "capa" && <CAPAPage />}
         {activePage === "pm" && <PMSchedulePage />}
+        {activePage === "hierarchy" && <HierarchyPage />}
+        {activePage === "tasks" && <TasksPage />}
+        {activePage === "timeline" && <TimelinePage />}
+        {activePage === "audit" && <AuditPage />}
         {activePage === "sync" && <SyncPage />}
+
         {activePage === "users" && <UsersPage />}
       </main>
     </div>

@@ -18,7 +18,10 @@ pub async fn sync_all(sqlite: State<'_, SqlitePool>) -> Result<String, String> {
 
 use sqlx::{SqlitePool, postgres::PgPoolOptions};
 use uuid::Uuid;
-use crate::models::{SyncConfig, SyncLog};
+use crate::models::{
+    SyncConfig, SyncLog,
+    Equipment, Downtime, RcaInvestigation, RcaNode, CAPA, PmSchedule,
+};
 
 pub async fn get_sync_config(pool: &SqlitePool) -> Result<SyncConfig, String> {
     let result = sqlx::query_as::<_, SyncConfig>(
@@ -30,6 +33,7 @@ pub async fn get_sync_config(pool: &SqlitePool) -> Result<SyncConfig, String> {
     Ok(result)
 }
 
+#[allow(dead_code)]
 pub async fn log_change(
     pool: &SqlitePool,
     table_name: &str,
@@ -107,7 +111,55 @@ pub async fn sync_to_postgres(pool: &SqlitePool) -> Result<String, String> {
     .await
     .map_err(|e| e.to_string())?;
 
-    Ok(format!("Sync complete: {} succeeded, {} failed out of {} total", success, failed, total))
+    // Snapshot upsert: push the full current state of every table so that
+    // records created before the change-log existed (or via paths that do not
+    // write sync_log) still reach PostgreSQL. Upserts are idempotent.
+    let snapshot = snapshot_push(pool, &pg_pool).await?;
+
+    Ok(format!(
+        "Sync complete: {} change-log rows succeeded, {} failed out of {}. Snapshot upserted {} rows.",
+        success, failed, total, snapshot
+    ))
+}
+
+/// Pushes the full contents of each local table to PostgreSQL using
+/// idempotent upserts. Returns the number of rows upserted.
+async fn snapshot_push(pool: &SqlitePool, pg_pool: &sqlx::PgPool) -> Result<usize, String> {
+    let mut count = 0usize;
+
+    macro_rules! push_table {
+        ($model:ty, $table:literal) => {{
+            let rows = sqlx::query_as::<_, $model>(concat!("SELECT * FROM ", $table))
+                .fetch_all(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            for row in &rows {
+                let payload = serde_json::to_value(row).map_err(|e| e.to_string())?;
+                let log = SyncLog {
+                    id: String::new(),
+                    table_name: $table.to_string(),
+                    record_id: payload["id"].as_str().unwrap_or("").to_string(),
+                    operation: "UPDATE".to_string(),
+                    payload: payload.to_string(),
+                    synced: 0,
+                    error: None,
+                    created_at: None,
+                };
+                if apply_to_postgres(pg_pool, &log).await.is_ok() {
+                    count += 1;
+                }
+            }
+        }};
+    }
+
+    push_table!(Equipment, "equipment");
+    push_table!(Downtime, "downtime");
+    push_table!(RcaInvestigation, "rca_investigations");
+    push_table!(RcaNode, "rca_nodes");
+    push_table!(CAPA, "capa");
+    push_table!(PmSchedule, "pm_schedule");
+
+    Ok(count)
 }
 
 pub async fn sync_from_postgres(pool: &SqlitePool) -> Result<String, String> {
@@ -232,6 +284,61 @@ async fn apply_to_postgres(pg_pool: &sqlx::PgPool, log: &SyncLog) -> Result<(), 
     Ok(())
 }
 
+/// Reads a JSON field as an owned `Option<String>`. Numbers/bools are
+/// stringified so callers can bind them uniformly to TEXT/INTEGER columns.
+fn js(payload: &serde_json::Value, key: &str) -> Option<String> {
+    match &payload[key] {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(s) => Some(s.clone()),
+        other => Some(other.to_string()),
+    }
+}
+
+fn js_f64(payload: &serde_json::Value, key: &str) -> f64 {
+    payload[key].as_f64().unwrap_or(0.0)
+}
+
+fn js_i64(payload: &serde_json::Value, key: &str) -> Option<i64> {
+    payload[key].as_i64()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{js, js_f64, js_i64};
+    use serde_json::json;
+
+    #[test]
+    fn js_reads_strings_and_stringifies_scalars() {
+        let v = json!({ "name": "Pump", "count": 3, "flag": true, "missing": null });
+        assert_eq!(js(&v, "name"), Some("Pump".to_string()));
+        assert_eq!(js(&v, "count"), Some("3".to_string()));
+        assert_eq!(js(&v, "flag"), Some("true".to_string()));
+        assert_eq!(js(&v, "missing"), None);
+        assert_eq!(js(&v, "absent"), None);
+    }
+
+    #[test]
+    fn js_f64_defaults_to_zero() {
+        let v = json!({ "x": 12.5, "y": "nope" });
+        assert_eq!(js_f64(&v, "x"), 12.5);
+        assert_eq!(js_f64(&v, "y"), 0.0);
+        assert_eq!(js_f64(&v, "absent"), 0.0);
+    }
+
+    #[test]
+    fn js_i64_parses_integers_only() {
+        let v = json!({ "n": 42, "s": "7" });
+        assert_eq!(js_i64(&v, "n"), Some(42));
+        assert_eq!(js_i64(&v, "s"), None);
+    }
+}
+
+/// Applies a record pulled from PostgreSQL into the local SQLite database.
+///
+/// Uses last-write-wins conflict resolution: for tables that carry an
+/// `updated_at` column, an incoming row is only written when it is newer than
+/// (or equal to) the local copy. Tables without `updated_at` are upserted via
+/// `INSERT OR REPLACE`.
 async fn apply_to_sqlite(
     pool: &SqlitePool,
     table: &str,
@@ -240,16 +347,149 @@ async fn apply_to_sqlite(
     let id = payload["id"].as_str().unwrap_or("").to_string();
     if id.is_empty() { return Ok(()); }
 
-    let exists: bool = sqlx::query_scalar(
-        &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE id = ?1)", table)
-    )
-    .bind(&id)
-    .fetch_one(pool)
-    .await
-    .unwrap_or(false);
+    // Last-write-wins guard for tables with an updated_at column.
+    if matches!(table, "equipment" | "rca_investigations" | "capa") {
+        if let Some(incoming) = js(payload, "updated_at") {
+            let local: Option<String> = sqlx::query_scalar(
+                &format!("SELECT updated_at FROM {} WHERE id = ?1", table)
+            )
+            .bind(&id)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| e.to_string())?
+            .flatten();
 
-    if !exists {
-        log_change(pool, table, &id, "INSERT", &payload.to_string()).await.ok();
+            // If a local row exists and is newer, skip the incoming change.
+            if let Some(local_ts) = local {
+                if local_ts > incoming {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    match table {
+        "equipment" => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO equipment
+                 (id, tag_number, name, description, location, criticality, status,
+                  equipment_type, parent_id, area_id, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
+            )
+            .bind(&id)
+            .bind(js(payload, "tag_number"))
+            .bind(js(payload, "name"))
+            .bind(js(payload, "description"))
+            .bind(js(payload, "location"))
+            .bind(js(payload, "criticality"))
+            .bind(js(payload, "status"))
+            .bind(js(payload, "equipment_type"))
+            .bind(js(payload, "parent_id"))
+            .bind(js(payload, "area_id"))
+            .bind(js(payload, "created_at"))
+            .bind(js(payload, "updated_at"))
+            .execute(pool).await.map_err(|e| e.to_string())?;
+        }
+        "downtime" => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO downtime
+                 (id, equipment_id, title, description, loss_category, start_time,
+                  end_time, duration_minutes, reported_by, created_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+            )
+            .bind(&id)
+            .bind(js(payload, "equipment_id"))
+            .bind(js(payload, "title"))
+            .bind(js(payload, "description"))
+            .bind(js(payload, "loss_category"))
+            .bind(js(payload, "start_time"))
+            .bind(js(payload, "end_time"))
+            .bind(js_i64(payload, "duration_minutes"))
+            .bind(js(payload, "reported_by"))
+            .bind(js(payload, "created_at"))
+            .execute(pool).await.map_err(|e| e.to_string())?;
+        }
+        "rca_investigations" => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO rca_investigations
+                 (id, downtime_id, equipment_id, title, description, status,
+                  created_by, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
+            )
+            .bind(&id)
+            .bind(js(payload, "downtime_id"))
+            .bind(js(payload, "equipment_id"))
+            .bind(js(payload, "title"))
+            .bind(js(payload, "description"))
+            .bind(js(payload, "status"))
+            .bind(js(payload, "created_by"))
+            .bind(js(payload, "created_at"))
+            .bind(js(payload, "updated_at"))
+            .execute(pool).await.map_err(|e| e.to_string())?;
+        }
+        "rca_nodes" => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO rca_nodes
+                 (id, investigation_id, parent_id, node_type, gate_type, title,
+                  description, created_at, x_pos, y_pos)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+            )
+            .bind(&id)
+            .bind(js(payload, "investigation_id"))
+            .bind(js(payload, "parent_id"))
+            .bind(js(payload, "node_type"))
+            .bind(js(payload, "gate_type"))
+            .bind(js(payload, "title"))
+            .bind(js(payload, "description"))
+            .bind(js(payload, "created_at"))
+            .bind(js_f64(payload, "x_pos"))
+            .bind(js_f64(payload, "y_pos"))
+            .execute(pool).await.map_err(|e| e.to_string())?;
+        }
+        "capa" => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO capa
+                 (id, investigation_id, title, owner, description, status,
+                  priority, due_date, created_at, updated_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+            )
+            .bind(&id)
+            .bind(js(payload, "investigation_id"))
+            .bind(js(payload, "title"))
+            .bind(js(payload, "owner"))
+            .bind(js(payload, "description"))
+            .bind(js(payload, "status"))
+            .bind(js(payload, "priority"))
+            .bind(js(payload, "due_date"))
+            .bind(js(payload, "created_at"))
+            .bind(js(payload, "updated_at"))
+            .execute(pool).await.map_err(|e| e.to_string())?;
+        }
+        "pm_schedule" => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO pm_schedule
+                 (id, equipment_id, title, description, frequency, next_due_date,
+                  last_completed_at, assigned_to, status, priority, attachments, created_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
+            )
+            .bind(&id)
+            .bind(js(payload, "equipment_id"))
+            .bind(js(payload, "title"))
+            .bind(js(payload, "description"))
+            .bind(js(payload, "frequency"))
+            .bind(js(payload, "next_due_date"))
+            .bind(js(payload, "last_completed_at"))
+            .bind(js(payload, "assigned_to"))
+            .bind(js(payload, "status"))
+            .bind(js(payload, "priority"))
+            .bind(js(payload, "attachments"))
+            .bind(js(payload, "created_at"))
+            .execute(pool).await.map_err(|e| e.to_string())?;
+        }
+        _ => {
+            // Unknown table – ignore rather than fail the whole pull.
+            return Ok(());
+        }
     }
 
     Ok(())

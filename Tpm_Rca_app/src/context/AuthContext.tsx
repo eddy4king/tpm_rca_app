@@ -18,8 +18,8 @@ interface AuthContextType {
   logout: () => Promise<void>;
   isAdmin: boolean;
   isLoading: boolean;
+  canEdit: (minRole: "Admin" | "Engineer" | "Technician" | "Viewer") => boolean;
 }
-
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -73,6 +73,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem("session_token");
   }
 
+  const roleRank: Record<string, number> = {
+    Admin: 4,
+    Engineer: 3,
+    Technician: 2,
+    Viewer: 1,
+  };
+
+  function canEdit(minRole: "Admin" | "Engineer" | "Technician" | "Viewer"): boolean {
+    if (!user) return false;
+    return roleRank[user.role] >= roleRank[minRole];
+  }
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -81,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       isAdmin: user?.role === "Admin",
       isLoading,
+      canEdit,
     }}>
       {children}
     </AuthContext.Provider>

@@ -5174,6 +5174,7 @@ dependencies = [
  "chrono",
  "dotenvy",
  "jsonwebtoken",
+ "lazy_static",
  "ort",
  "reqwest 0.12.28",
  "serde",

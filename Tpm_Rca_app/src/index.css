@@ -1,1 +1,58 @@
 @import "tailwindcss";
+
+/* Plain-CSS form control used by modals/forms (avoids @apply issues in Tailwind v4) */
+.input {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.75rem;
+  padding: 0.625rem 1rem;
+  width: 100%;
+  outline: none;
+  background-color: #fff;
+  color: #1e293b;
+}
+.input:focus {
+  box-shadow: 0 0 0 2px #a5b4fc;
+  border-color: #a5b4fc;
+}
+.dark .input {
+  background-color: #0f172a;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+/* Global dark‑mode overrides.
+ *
+ * The app's pages use fixed slate/white utility classes rather than Tailwind
+ * `dark:` variants. Instead of editing every page, we remap the most common
+ * surface/text/border utilities when the root <html> carries the `.dark` class
+ * (toggled by ThemeContext). `.dark X` selectors outrank the base utilities by
+ * specificity, so these win automatically. */
+@layer utilities {
+  /* Surfaces */
+  .dark .bg-white { background-color: #1e293b; }
+  .dark .bg-slate-50 { background-color: #0f172a; }
+  .dark .bg-slate-100 { background-color: #334155; }
+  .dark .bg-slate-200 { background-color: #334155; }
+
+  /* Text */
+  .dark .text-black { color: #ffffff; }
+  .dark .text-slate-900 { color: #f1f5f9; }
+  .dark .text-slate-800 { color: #e2e8f0; }
+  .dark .text-slate-700 { color: #cbd5e1; }
+  .dark .text-slate-600 { color: #cbd5e1; }
+  .dark .text-slate-500 { color: #94a3b8; }
+
+  /* Borders */
+  .dark .border-slate-100 { border-color: #334155; }
+  .dark .border-slate-200 { border-color: #334155; }
+  .dark .border-slate-300 { border-color: #475569; }
+
+  /* Hover states (escaped colon for the variant class name) */
+  .dark .hover\:bg-slate-50:hover { background-color: #334155; }
+  .dark .hover\:bg-slate-100:hover { background-color: #334155; }
+  .dark .hover\:bg-slate-200:hover { background-color: #475569; }
+
+  /* Divide borders used in tables/lists */
+  .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #334155; }
+}
+

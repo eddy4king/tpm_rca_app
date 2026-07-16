@@ -49,9 +49,26 @@ use commands::{
     has_users,
     get_users_debug,
     reset_users,
-    clear_all_sessions
+    clear_all_sessions,
+    check_permission,
+    admin_reset_password,
+    change_own_password,
+    set_recovery_question,
+    get_recovery_question,
+    verify_recovery_answer,
+    get_oee_metrics,
+    
+    
 };
-
+use commands::role::get_role_permissions;
+use crate::services::integrations::*;
+use commands::hierarchy::{
+    create_plant, get_all_plants, update_plant, delete_plant,
+    create_area, get_areas_by_plant, get_all_areas, update_area, delete_area,
+};
+use commands::audit::{create_audit_log, get_audit_logs};
+use commands::timeline::get_maintenance_timeline;
+use commands::backup::{backup_database, list_backups, restore_database};
 
 
 mod commands;
@@ -133,7 +150,31 @@ pub fn run() {
             has_users,
             get_users_debug,
             reset_users,
-            clear_all_sessions])
+            clear_all_sessions,
+            check_permission,
+            admin_reset_password,
+            change_own_password,
+            set_recovery_question,
+            get_recovery_question,
+            verify_recovery_answer,
+            get_role_permissions,
+            get_oee_metrics,
+            create_issue,
+            create_plant,
+            get_all_plants,
+            update_plant,
+            delete_plant,
+            create_area,
+            get_areas_by_plant,
+            get_all_areas,
+            update_area,
+            delete_area,
+            create_audit_log,
+            get_audit_logs,
+            get_maintenance_timeline,
+            backup_database,
+            list_backups,
+            restore_database])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
