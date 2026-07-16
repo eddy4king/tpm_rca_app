@@ -9,6 +9,9 @@ jobs:
   frontend:
     name: Frontend (typecheck, test, build)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Tpm_Rca_app
     steps:
       - uses: actions/checkout@v4
 
@@ -17,6 +20,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: Tpm_Rca_app/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -35,7 +39,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: src-tauri
+        working-directory: Tpm_Rca_app/src-tauri
     steps:
       - uses: actions/checkout@v4
 
@@ -48,8 +52,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+            Tpm_Rca_app/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Tpm_Rca_app/src-tauri/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Check formatting
