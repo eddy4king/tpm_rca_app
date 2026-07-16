@@ -269,7 +269,7 @@ function DashboardPage({ onNavigate }: { onNavigate: NavigateFn }) { // Dashboar
           </div>
 
         {/* TOP KPI ROW */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6" data-tour="dashboard-kpi">
           <KpiCard
             label="Availability"
             value={metrics.availability}

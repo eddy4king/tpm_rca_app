@@ -76,6 +76,18 @@ const FIELD_ALIASES: Record<keyof ImportRow, string[]> = {
   parent_id: ["parent", "parentid", "parenttag"],
 };
 
+const IMPORT_FIELDS: { key: keyof ImportRow; label: string; required: boolean; hint?: string }[] = [
+  { key: "tag_number", label: "Tag Number", required: true },
+  { key: "name", label: "Name", required: true },
+  { key: "equipment_type", label: "Equipment Type", required: false },
+  { key: "status", label: "Status", required: false, hint: "Running / Standby / Under Maintenance / Failed" },
+  { key: "criticality", label: "Criticality", required: false, hint: "Critical / High / Medium / Low" },
+  { key: "location", label: "Location", required: false },
+  { key: "area_id", label: "Area", required: false, hint: "Area name or ID (matches export)" },
+  { key: "description", label: "Description", required: false },
+  { key: "parent_id", label: "Parent ID/Tag", required: false },
+];
+
 function normalizeValue(value: string | undefined, fallback: string): string {
   const v = (value || "").trim();
   return v || fallback;
@@ -131,9 +143,13 @@ function EquipmentPage() {
   const [loading, setLoading] = useState(true);
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
 
-  const [importOpen, setImportOpen] = useState(false);
-  const [importRows, setImportRows] = useState<ImportRow[]>([]);
-  const [importSkipped, setImportSkipped] = useState(0);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [csvRows, setCsvRows] = useState<string[][]>([]);
+  const [mapping, setMapping] = useState<Record<keyof ImportRow, number>>({
+    tag_number: -1, name: -1, equipment_type: -1, status: -1,
+    criticality: -1, location: -1, area_id: -1, description: -1, parent_id: -1,
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [ui, setUi] = useState({
@@ -168,6 +184,8 @@ function EquipmentPage() {
     const matchesType = !ui.typeFilter || eq.equipment_type === ui.typeFilter;
     return matchesSearch && matchesStatus && matchesCriticality && matchesType;
   }), [equipment, ui]);
+
+  const preview = useMemo(() => buildImportRows(mapping), [mapping, csvRows]);
 
   const areaMap = useMemo(() => new Map(areas.map((a) => [a.id, a])), [areas]);
   const plantMap = useMemo(() => new Map(plants.map((p) => [p.id, p])), [plants]);
@@ -270,10 +288,74 @@ function EquipmentPage() {
 
   function resolveArea(raw: string): string | null {
     if (!raw) return null;
-    const a = areas.find(
-      (x) => x.id === raw || (x.name || "").toLowerCase() === raw.toLowerCase()
-    );
-    return a ? a.id : null;
+    // Accept an id, an area name, or the "Plant / Area" label used by export.
+    const candidates = [raw, raw.split("/").pop()?.trim(), raw.split("/")[0]?.trim()]
+      .filter((c): c is string => !!c);
+    for (const c of candidates) {
+      const a = areas.find(
+        (x) => x.id === c || (x.name || "").toLowerCase() === c.toLowerCase()
+      );
+      if (a) return a.id;
+    }
+    return null;
+  }
+
+  function autoMap(headers: string[]): Record<keyof ImportRow, number> {
+    const norm = headers.map(normalizeHeader);
+    const find = (aliases: string[]) => norm.findIndex((h) => aliases.includes(h));
+    return {
+      tag_number: find(FIELD_ALIASES.tag_number),
+      name: find(FIELD_ALIASES.name),
+      equipment_type: find(FIELD_ALIASES.equipment_type),
+      status: find(FIELD_ALIASES.status),
+      criticality: find(FIELD_ALIASES.criticality),
+      location: find(FIELD_ALIASES.location),
+      area_id: find(FIELD_ALIASES.area_id),
+      description: find(FIELD_ALIASES.description),
+      parent_id: find(FIELD_ALIASES.parent_id),
+    };
+  }
+
+  function buildImportRows(map: Record<keyof ImportRow, number>): {
+    rows: ImportRow[];
+    skipped: number;
+  } {
+    const out: ImportRow[] = [];
+    let skipped = 0;
+    for (const r of csvRows) {
+      const tag = map.tag_number >= 0 ? (r[map.tag_number] || "").trim() : "";
+      const name = map.name >= 0 ? (r[map.name] || "").trim() : "";
+      if (!tag || !name) {
+        skipped++;
+        continue;
+      }
+      out.push({
+        tag_number: tag,
+        name,
+        equipment_type: map.equipment_type >= 0 ? (r[map.equipment_type] || "").trim() || null : null,
+        status: map.status >= 0 ? normalizeStatus(r[map.status]) : "Running",
+        criticality: map.criticality >= 0 ? normalizeCriticality(r[map.criticality]) : "Medium",
+        location: map.location >= 0 ? (r[map.location] || "").trim() || null : null,
+        area_id: map.area_id >= 0 ? resolveArea((r[map.area_id] || "").trim()) : null,
+        description: map.description >= 0 ? (r[map.description] || "").trim() || null : null,
+        parent_id: map.parent_id >= 0 ? (r[map.parent_id] || "").trim() || null : null,
+      });
+    }
+    return { rows: out, skipped };
+  }
+
+  function downloadTemplate() {
+    exportToCsv("equipment_import_template", [], [
+      { key: "tag_number", label: "Tag Number" },
+      { key: "name", label: "Name" },
+      { key: "equipment_type", label: "Type" },
+      { key: "status", label: "Status" },
+      { key: "criticality", label: "Criticality" },
+      { key: "location", label: "Location" },
+      { key: "area_id", label: "Area" },
+      { key: "description", label: "Description" },
+      { key: "parent_id", label: "Parent ID" },
+    ]);
   }
 
   async function handleFile(e: ChangeEvent<HTMLInputElement>) {
@@ -291,65 +373,28 @@ function EquipmentPage() {
 
     const { headers, rows } = parseCsv(text);
     if (headers.length === 0) {
-      toast.error("The CSV file appears to be empty");
+      toast.error("The selected file has no header row");
       return;
     }
 
-    const norm = headers.map(normalizeHeader);
-    const indexOf = (aliases: string[]) => norm.findIndex((h) => aliases.includes(h));
-    const col = {
-      tag: indexOf(FIELD_ALIASES.tag_number),
-      name: indexOf(FIELD_ALIASES.name),
-      type: indexOf(FIELD_ALIASES.equipment_type),
-      status: indexOf(FIELD_ALIASES.status),
-      criticality: indexOf(FIELD_ALIASES.criticality),
-      location: indexOf(FIELD_ALIASES.location),
-      area: indexOf(FIELD_ALIASES.area_id),
-      description: indexOf(FIELD_ALIASES.description),
-      parent: indexOf(FIELD_ALIASES.parent_id),
-    };
-
-    const parsed: ImportRow[] = [];
-    let skipped = 0;
-    for (const r of rows) {
-      const tag = (col.tag >= 0 ? r[col.tag] : "").trim();
-      const name = (col.name >= 0 ? r[col.name] : "").trim();
-      if (!tag || !name) {
-        skipped++;
-        continue;
-      }
-      parsed.push({
-        tag_number: tag,
-        name,
-        equipment_type: col.type >= 0 ? (r[col.type].trim() || null) : null,
-        status: col.status >= 0 ? normalizeStatus(r[col.status]) : "Running",
-        criticality: col.criticality >= 0 ? normalizeCriticality(r[col.criticality]) : "Medium",
-        location: col.location >= 0 ? (r[col.location].trim() || null) : null,
-        area_id: col.area >= 0 ? resolveArea(r[col.area].trim()) : null,
-        description: col.description >= 0 ? (r[col.description].trim() || null) : null,
-        parent_id: col.parent >= 0 ? (r[col.parent].trim() || null) : null,
-      });
-    }
-
-    if (parsed.length === 0) {
-      toast.error(
-        `No valid rows found${skipped ? ` (${skipped} skipped — Tag Number and Name are required)` : ""}`
-      );
-      return;
-    }
-    setImportRows(parsed);
-    setImportSkipped(skipped);
-    setImportOpen(true);
+    setCsvHeaders(headers);
+    setCsvRows(rows);
+    setMapping(autoMap(headers));
+    setMapOpen(true);
   }
 
   async function confirmImport() {
+    const { rows, skipped } = buildImportRows(mapping);
+    if (rows.length === 0) {
+      toast.error("No valid rows — map Tag Number and Name, then try again.");
+      return;
+    }
     try {
-      const count = await invoke<number>("import_equipment_csv", { rows: importRows });
+      const count = await invoke<number>("import_equipment_csv", { rows });
       await loadEquipment();
-      setImportOpen(false);
-      setImportRows([]);
+      setMapOpen(false);
       toast.success(
-        `Imported ${count} equipment record(s)${importSkipped ? `, ${importSkipped} skipped` : ""}`
+        `Imported ${count} equipment record(s)${skipped ? `, ${skipped} skipped` : ""}`
       );
     } catch (err) {
       toast.error(`Import failed: ${err}`);
@@ -502,18 +547,56 @@ function EquipmentPage() {
         onChange={handleFile}
       />
 
-      {importOpen && (
-        <Modal title="Confirm CSV Import" onClose={() => setImportOpen(false)} maxWidth="max-w-md">
+      {mapOpen && (
+        <Modal title="Import Equipment from CSV" onClose={() => setMapOpen(false)} maxWidth="max-w-lg">
           <div className="space-y-4">
             <p className="text-sm text-slate-500">
-              {importRows.length} equipment record(s) will be imported.
-              {importSkipped > 0 && (
-                <span className="text-amber-600">
-                  {" "}{importSkipped} row(s) skipped (missing Tag Number or Name).
-                </span>
-              )}
+              Match your CSV columns to the equipment fields. Tag Number and Name are required.
+              {" "}
+              <button type="button" className="text-blue-600 hover:underline" onClick={downloadTemplate}>
+                Download a template
+              </button>
             </p>
-            <div className="max-h-56 overflow-y-auto border border-slate-100 rounded-lg">
+
+            <div className="max-h-64 overflow-y-auto border border-slate-100 dark:border-slate-700 rounded-xl divide-y divide-slate-100 dark:divide-slate-700">
+              {IMPORT_FIELDS.map((f) => (
+                <div key={f.key} className="flex items-center gap-3 px-3 py-2">
+                  <div className="w-40 shrink-0">
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                      {f.label}{f.required && <span className="text-rose-500"> *</span>}
+                    </p>
+                    {f.hint && <p className="text-[11px] text-slate-400">{f.hint}</p>}
+                  </div>
+                  <Select
+                    value={mapping[f.key]}
+                    onChange={(e) => setMapping((m) => ({ ...m, [f.key]: Number(e.target.value) }))}
+                    className="flex-1"
+                  >
+                    <option value={-1}>— Ignore —</option>
+                    {csvHeaders.map((h, i) => (
+                      <option key={i} value={i}>{h || `(column ${i + 1})`}</option>
+                    ))}
+                  </Select>
+                </div>
+              ))}
+            </div>
+
+            <div className="text-sm">
+              {preview.rows.length === 0 ? (
+                <p className="text-amber-600">
+                  No rows will be imported yet — map Tag Number and Name to continue.
+                </p>
+              ) : (
+                <p className="text-slate-500">
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">{preview.rows.length}</span> record(s) ready
+                  {preview.skipped > 0 && (
+                    <span className="text-amber-600"> · {preview.skipped} skipped (missing Tag/Name)</span>
+                  )}
+                </p>
+              )}
+            </div>
+
+            <div className="max-h-44 overflow-y-auto border border-slate-100 dark:border-slate-700 rounded-lg">
               <table className="w-full text-sm">
                 <thead className={tableHeadClass}>
                   <tr>
@@ -523,7 +606,7 @@ function EquipmentPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {importRows.slice(0, 50).map((r, i) => (
+                  {preview.rows.slice(0, 30).map((r, i) => (
                     <tr key={i} className={trClass}>
                       <td className={`${tdClass} font-mono`}>{r.tag_number}</td>
                       <td className={tdClass}>{r.name}</td>
@@ -533,32 +616,12 @@ function EquipmentPage() {
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-slate-400">
-              Expected columns: Tag Number, Name, Type, Status, Criticality, Location, Area, Description, Parent ID.
-              {" "}
-              <button
-                type="button"
-                className="text-blue-600 hover:underline"
-                onClick={() =>
-                  exportToCsv("equipment_import_template", [], [
-                    { key: "tag_number", label: "Tag Number" },
-                    { key: "name", label: "Name" },
-                    { key: "equipment_type", label: "Type" },
-                    { key: "status", label: "Status" },
-                    { key: "criticality", label: "Criticality" },
-                    { key: "location", label: "Location" },
-                    { key: "area_id", label: "Area" },
-                    { key: "description", label: "Description" },
-                    { key: "parent_id", label: "Parent ID" },
-                  ])
-                }
-              >
-                Download template
-              </button>
-            </p>
+
             <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={() => setImportOpen(false)}>Cancel</Button>
-              <Button onClick={confirmImport}>Import {importRows.length}</Button>
+              <Button variant="secondary" onClick={() => setMapOpen(false)}>Cancel</Button>
+              <Button onClick={confirmImport} disabled={preview.rows.length === 0}>
+                Import {preview.rows.length || ""}
+              </Button>
             </div>
           </div>
         </Modal>
@@ -600,6 +663,7 @@ function EquipmentPage() {
             </Button>
             {canEditEquipment && (
               <Button
+                data-tour="add-equipment"
                 onClick={() => { resetForm(); setUi((prev) => ({ ...prev, showForm: !prev.showForm })); }}
               >
                 <Plus className="w-4 h-4" /> Add Equipment

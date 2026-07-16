@@ -56,3 +56,10 @@
   .dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #334155; }
 }
 
+/* Mascot "teacher" float animation used in the guided tour */
+@keyframes mascot-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-8px) rotate(2deg); }
+}
+.animate-mascot { animation: mascot-float 2.6s ease-in-out infinite; }
+

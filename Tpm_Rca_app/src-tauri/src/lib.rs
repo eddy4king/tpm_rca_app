@@ -63,6 +63,7 @@ use commands::{
 };
 use commands::role::get_role_permissions;
 use crate::services::integrations::*;
+use crate::services::ai::rca_coach_report;
 use commands::hierarchy::{
     create_plant, get_all_plants, update_plant, delete_plant,
     create_area, get_areas_by_plant, get_all_areas, update_area, delete_area,
@@ -162,6 +163,7 @@ pub fn run() {
             get_role_permissions,
             get_oee_metrics,
             create_issue,
+            rca_coach_report,
             create_plant,
             get_all_plants,
             update_plant,

@@ -182,4 +182,25 @@ Prepared by: OpenCode AI (generated 2026‑06‑11)
 
 Version: 1.0.0‑draft
 
+---
+
+## 12. Competitive Roadmap (Features 1–7)
+
+To outpace mainstream CMMS tools (Fiix, UpKeep, MaintainX, eMaint), we lean
+into existing strengths — **offline‑first**, **zero‑infrastructure**, **TPM/RCA
+focus**, and **QR‑native** workflows — and add the differentiators below.
+Full build notes, file targets and suggested order are in **`ROADMAP.md`**.
+
+| # | Feature | One‑line differentiator |
+|---|---------|--------------------------|
+| 1 | **AI RCA Coach** ("Ruca" upgraded) | Suggests failure modes, drafts the RCA tree, surfaces recurring failures from history — not a static text box. |
+| 2 | **Reliability‑Engineering Depth** | FMEA, failure Pareto, Weibull/MTBF, RUL estimates — engineering math incumbents skip. |
+| 3 | **Financial Visibility** | Downtime $/hr, lost‑production $, maintenance‑vs‑asset cost — turns a cost tool into a savings tool. |
+| 4 | **Tribal‑Knowledge Capture** | "How we fixed it" notes + photos per asset so expertise survives staff turnover. |
+| 5 | **Zero‑Friction Shop‑Floor Capture** | Voice entry, one‑tap downtime, camera→QR/NFC lookup, LAN peer‑sync with no server. |
+| 6 | **TPM Culture Features** | OEE leaderboards per line, Kaizen/CIP suggestions, operator recognition. |
+| 7 | **Open & Portable by Default** | No per‑seat subscription, no lock‑in, full export, self‑hosted sync target. |
+
+**Suggested build order:** 1 → 2 → 5 → 3 → 4 → 6 → 7.
+
 End of Document

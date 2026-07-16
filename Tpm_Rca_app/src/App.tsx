@@ -17,6 +17,7 @@ import SyncPage from "./pages/SyncPage";
 import UsersPage from "./pages/UsersPage";
 import LoginPage from "./pages/LoginPage";
 import Sidebar from "./components/Sidebar";
+import { TourProvider } from "./context/TourContext";
 
 type Page = "equipment" | "downtime" | "rca" | "capa" | "dashboard" | "pm" | "hierarchy" | "tasks" | "timeline" | "audit" | "sync" | "users";
 
@@ -71,28 +72,30 @@ function AppInner() {
   const navItems = isAdmin ? [...permittedNav, { key: "users", label: "Users" }] : permittedNav;
 
   return (
-    <div className="h-screen flex bg-slate-50 text-slate-800">
-      <Sidebar
-        navItems={navItems as { key: string; label: string }[]}
-        activePage={activePage}
-        onNavigate={(p) => setActivePage(p as Page)}
-      />
-      <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
-        {activePage === "dashboard" && <DashboardPage onNavigate={(p) => setActivePage(p as Page)} />}
-        {activePage === "equipment" && <EquipmentPage />}
-        {activePage === "downtime" && <DowntimePage />}
-        {activePage === "rca" && <RcaPage />}
-        {activePage === "capa" && <CAPAPage />}
-        {activePage === "pm" && <PMSchedulePage />}
-        {activePage === "hierarchy" && <HierarchyPage />}
-        {activePage === "tasks" && <TasksPage />}
-        {activePage === "timeline" && <TimelinePage />}
-        {activePage === "audit" && <AuditPage />}
-        {activePage === "sync" && <SyncPage />}
+    <TourProvider navigate={(p) => setActivePage(p as Page)}>
+      <div className="h-screen flex bg-slate-50 text-slate-800">
+        <Sidebar
+          navItems={navItems as { key: string; label: string }[]}
+          activePage={activePage}
+          onNavigate={(p) => setActivePage(p as Page)}
+        />
+        <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          {activePage === "dashboard" && <DashboardPage onNavigate={(p) => setActivePage(p as Page)} />}
+          {activePage === "equipment" && <EquipmentPage />}
+          {activePage === "downtime" && <DowntimePage />}
+          {activePage === "rca" && <RcaPage />}
+          {activePage === "capa" && <CAPAPage />}
+          {activePage === "pm" && <PMSchedulePage />}
+          {activePage === "hierarchy" && <HierarchyPage />}
+          {activePage === "tasks" && <TasksPage />}
+          {activePage === "timeline" && <TimelinePage />}
+          {activePage === "audit" && <AuditPage />}
+          {activePage === "sync" && <SyncPage />}
 
-        {activePage === "users" && <UsersPage />}
-      </main>
-    </div>
+          {activePage === "users" && <UsersPage />}
+        </main>
+      </div>
+    </TourProvider>
   );
 }
 
