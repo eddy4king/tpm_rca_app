@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import type { ChangeEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -24,9 +25,10 @@ import {
   trClass,
 } from "../components/ui";
 import {
-  Search, Plus, Pencil, Trash2, Cog, ChevronLeft, Layers, Download, QrCode as QrIcon,
+  Search, Plus, Pencil, Trash2, Cog, ChevronLeft, Layers, Download, QrCode as QrIcon, Upload,
 } from "lucide-react";
 import { exportToCsv } from "../lib/export";
+import { parseCsv, normalizeHeader } from "../lib/csv";
 import QrCode, { equipmentQrValue, parseEquipmentQr } from "../components/QrCode";
 
 interface Equipment {
@@ -46,6 +48,48 @@ interface Equipment {
 
 interface Area { id: string; plant_id: string; name: string | null; }
 interface Plant { id: string; name: string | null; }
+
+interface ImportRow {
+  tag_number: string;
+  name: string;
+  description: string | null;
+  location: string | null;
+  criticality: string;
+  status: string;
+  equipment_type: string | null;
+  parent_id: string | null;
+  area_id: string | null;
+}
+
+const VALID_STATUS = ["Running", "Standby", "Under Maintenance", "Failed"];
+const VALID_CRITICALITY = ["Critical", "High", "Medium", "Low"];
+
+const FIELD_ALIASES: Record<keyof ImportRow, string[]> = {
+  tag_number: ["tagnumber", "tag", "tagnum", "tagno"],
+  name: ["name", "equipmentname", "equipment", "assetname", "asset"],
+  equipment_type: ["type", "equipmenttype"],
+  status: ["status", "state"],
+  criticality: ["criticality", "criticalitylevel", "priority"],
+  location: ["location", "site", "place"],
+  area_id: ["area", "areaid", "arename"],
+  description: ["description", "desc", "notes", "remarks"],
+  parent_id: ["parent", "parentid", "parenttag"],
+};
+
+function normalizeValue(value: string | undefined, fallback: string): string {
+  const v = (value || "").trim();
+  return v || fallback;
+}
+
+function normalizeStatus(value: string | undefined): string {
+  const v = normalizeValue(value, "Running");
+  return VALID_STATUS.includes(v) ? v : "Running";
+}
+
+function normalizeCriticality(value: string | undefined): string {
+  const v = normalizeValue(value, "Medium");
+  return VALID_CRITICALITY.includes(v) ? v : "Medium";
+}
 
 const defaultForm = {
   tag_number: "",
@@ -86,6 +130,11 @@ function EquipmentPage() {
   const [plants, setPlants] = useState<Plant[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
+
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [importSkipped, setImportSkipped] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [ui, setUi] = useState({
     error: null as string | null,
@@ -216,6 +265,94 @@ function EquipmentPage() {
     } catch (err) {
       setUi((prev) => ({ ...prev, error: String(err) }));
       toast.error(`Failed to delete equipment: ${err}`);
+    }
+  }
+
+  function resolveArea(raw: string): string | null {
+    if (!raw) return null;
+    const a = areas.find(
+      (x) => x.id === raw || (x.name || "").toLowerCase() === raw.toLowerCase()
+    );
+    return a ? a.id : null;
+  }
+
+  async function handleFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      toast.error("Could not read the selected file");
+      return;
+    }
+
+    const { headers, rows } = parseCsv(text);
+    if (headers.length === 0) {
+      toast.error("The CSV file appears to be empty");
+      return;
+    }
+
+    const norm = headers.map(normalizeHeader);
+    const indexOf = (aliases: string[]) => norm.findIndex((h) => aliases.includes(h));
+    const col = {
+      tag: indexOf(FIELD_ALIASES.tag_number),
+      name: indexOf(FIELD_ALIASES.name),
+      type: indexOf(FIELD_ALIASES.equipment_type),
+      status: indexOf(FIELD_ALIASES.status),
+      criticality: indexOf(FIELD_ALIASES.criticality),
+      location: indexOf(FIELD_ALIASES.location),
+      area: indexOf(FIELD_ALIASES.area_id),
+      description: indexOf(FIELD_ALIASES.description),
+      parent: indexOf(FIELD_ALIASES.parent_id),
+    };
+
+    const parsed: ImportRow[] = [];
+    let skipped = 0;
+    for (const r of rows) {
+      const tag = (col.tag >= 0 ? r[col.tag] : "").trim();
+      const name = (col.name >= 0 ? r[col.name] : "").trim();
+      if (!tag || !name) {
+        skipped++;
+        continue;
+      }
+      parsed.push({
+        tag_number: tag,
+        name,
+        equipment_type: col.type >= 0 ? (r[col.type].trim() || null) : null,
+        status: col.status >= 0 ? normalizeStatus(r[col.status]) : "Running",
+        criticality: col.criticality >= 0 ? normalizeCriticality(r[col.criticality]) : "Medium",
+        location: col.location >= 0 ? (r[col.location].trim() || null) : null,
+        area_id: col.area >= 0 ? resolveArea(r[col.area].trim()) : null,
+        description: col.description >= 0 ? (r[col.description].trim() || null) : null,
+        parent_id: col.parent >= 0 ? (r[col.parent].trim() || null) : null,
+      });
+    }
+
+    if (parsed.length === 0) {
+      toast.error(
+        `No valid rows found${skipped ? ` (${skipped} skipped — Tag Number and Name are required)` : ""}`
+      );
+      return;
+    }
+    setImportRows(parsed);
+    setImportSkipped(skipped);
+    setImportOpen(true);
+  }
+
+  async function confirmImport() {
+    try {
+      const count = await invoke<number>("import_equipment_csv", { rows: importRows });
+      await loadEquipment();
+      setImportOpen(false);
+      setImportRows([]);
+      toast.success(
+        `Imported ${count} equipment record(s)${importSkipped ? `, ${importSkipped} skipped` : ""}`
+      );
+    } catch (err) {
+      toast.error(`Import failed: ${err}`);
     }
   }
 
@@ -357,6 +494,76 @@ function EquipmentPage() {
           </div>
         </Modal>
       )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={handleFile}
+      />
+
+      {importOpen && (
+        <Modal title="Confirm CSV Import" onClose={() => setImportOpen(false)} maxWidth="max-w-md">
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500">
+              {importRows.length} equipment record(s) will be imported.
+              {importSkipped > 0 && (
+                <span className="text-amber-600">
+                  {" "}{importSkipped} row(s) skipped (missing Tag Number or Name).
+                </span>
+              )}
+            </p>
+            <div className="max-h-56 overflow-y-auto border border-slate-100 rounded-lg">
+              <table className="w-full text-sm">
+                <thead className={tableHeadClass}>
+                  <tr>
+                    <th className={thClass}>Tag</th>
+                    <th className={thClass}>Name</th>
+                    <th className={thClass}>Type</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importRows.slice(0, 50).map((r, i) => (
+                    <tr key={i} className={trClass}>
+                      <td className={`${tdClass} font-mono`}>{r.tag_number}</td>
+                      <td className={tdClass}>{r.name}</td>
+                      <td className={`${tdClass} text-slate-600`}>{r.equipment_type || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-slate-400">
+              Expected columns: Tag Number, Name, Type, Status, Criticality, Location, Area, Description, Parent ID.
+              {" "}
+              <button
+                type="button"
+                className="text-blue-600 hover:underline"
+                onClick={() =>
+                  exportToCsv("equipment_import_template", [], [
+                    { key: "tag_number", label: "Tag Number" },
+                    { key: "name", label: "Name" },
+                    { key: "equipment_type", label: "Type" },
+                    { key: "status", label: "Status" },
+                    { key: "criticality", label: "Criticality" },
+                    { key: "location", label: "Location" },
+                    { key: "area_id", label: "Area" },
+                    { key: "description", label: "Description" },
+                    { key: "parent_id", label: "Parent ID" },
+                  ])
+                }
+              >
+                Download template
+              </button>
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setImportOpen(false)}>Cancel</Button>
+              <Button onClick={confirmImport}>Import {importRows.length}</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       <PageHeader
         title="Equipment Register"
         subtitle="Centralized industrial equipment management"
@@ -366,6 +573,11 @@ function EquipmentPage() {
             <Button variant="secondary" onClick={() => setLookupOpen(true)}>
               <QrIcon className="w-4 h-4" /> QR Lookup
             </Button>
+            {canEditEquipment && (
+              <Button variant="secondary" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="w-4 h-4" /> Import CSV
+              </Button>
+            )}
             <Button
               variant="secondary"
               disabled={!filteredEquipment.length}
