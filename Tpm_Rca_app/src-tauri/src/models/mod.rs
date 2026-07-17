@@ -183,6 +183,16 @@ pub struct Session {
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct Photo {
+    pub id: String,
+    pub record_type: String,
+    pub record_id: String,
+    pub caption: Option<String>,
+    pub data: String,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct FmeaRow {
     pub id: String,
     pub equipment_id: String,

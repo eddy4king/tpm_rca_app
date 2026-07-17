@@ -29,6 +29,7 @@ pub mod hierarchy;
 pub mod timeline;
 pub mod backup;
 pub mod knowledge;
+pub mod photos;
 
 
 #[derive(Deserialize)]

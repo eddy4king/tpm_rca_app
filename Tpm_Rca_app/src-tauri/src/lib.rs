@@ -71,6 +71,7 @@ use commands::knowledge::{
     create_knowledge_note, get_knowledge_notes, get_knowledge_note, update_knowledge_note,
     delete_knowledge_note, search_knowledge_notes,
 };
+use commands::photos::{add_photo, get_photos, delete_photo};
 use crate::services::integrations::*;
 use crate::services::ai::rca_coach_report;
 use crate::services::reliability::reliability_report;
@@ -257,7 +258,10 @@ pub fn run() {
             get_knowledge_note,
             update_knowledge_note,
             delete_knowledge_note,
-            search_knowledge_notes])
+            search_knowledge_notes,
+            add_photo,
+            get_photos,
+            delete_photo])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

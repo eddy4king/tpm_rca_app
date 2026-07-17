@@ -17,6 +17,7 @@ import {
   type DowntimeDraft,
 } from "../lib/drafts";
 import TagScanner from "../components/TagScanner";
+import PhotoCapture from "../components/PhotoCapture";
 import {
   Button,
   Card,
@@ -434,6 +435,8 @@ function DowntimePage() {
               Delete
             </Button>
           </div>
+
+          <PhotoCapture recordType="downtime" recordId={selectedDowntime.id} />
         </Card>
       </div>
     );

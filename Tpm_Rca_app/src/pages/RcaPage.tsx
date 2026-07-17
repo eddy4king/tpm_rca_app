@@ -44,6 +44,7 @@ import {
   Banner,
 } from "../components/ui";
 import RcaCoach from "../components/RcaCoach";
+import PhotoCapture from "../components/PhotoCapture";
 
 interface Equipment {
   id: string;
@@ -530,6 +531,12 @@ function RcaPage() {
               </div>
             </Card>
           </div>
+
+          {selectedInvestigation && (
+            <div className="mt-4">
+              <PhotoCapture recordType="rca" recordId={selectedInvestigation.id} />
+            </div>
+          )}
         </div>
 
         {/* FLOW + RIGHT PANEL */}
