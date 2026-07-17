@@ -28,6 +28,7 @@ import {
   Clock3,
   XCircle,
   Filter,
+  Sparkles,
 } from "lucide-react";
 import "reactflow/dist/style.css";
 import {
@@ -42,6 +43,7 @@ import {
   LoadingState,
   Banner,
 } from "../components/ui";
+import RcaCoach from "../components/RcaCoach";
 
 interface Equipment {
   id: string;
@@ -153,6 +155,7 @@ function RcaPage() {
   const [editingInvestigationId, setEditingInvestigationId] = useState<string | null>(null);
   const [deleteInv, setDeleteInv] = useState<string | null>(null);
   const [deleteNode, setDeleteNode] = useState<string | null>(null);
+  const [coachOpen, setCoachOpen] = useState(false);
 
   const [investigationForm, setInvestigationForm] = useState({
     title: "", description: "", created_by: "", status: "Open",
@@ -415,6 +418,12 @@ function RcaPage() {
               className="w-full bg-blue-600 hover:bg-blue-500 text-white rounded-xl py-2.5 px-5 flex items-center justify-center gap-2 font-medium transition-colors duration-150"
           >
             <Plus className="w-4 h-4" /> New Investigation
+          </button>
+          <button
+            onClick={() => setCoachOpen(true)}
+            className="w-full bg-violet-600 hover:bg-violet-500 text-white rounded-xl py-2.5 px-5 flex items-center justify-center gap-2 font-medium transition-colors duration-150"
+          >
+            <Sparkles className="w-4 h-4" /> Ask Ruca (Coach)
           </button>
         </div>
 
@@ -808,6 +817,15 @@ function RcaPage() {
               Copy to Clipboard
             </Button>
         </Modal>
+      )}
+
+      {coachOpen && (
+        <RcaCoach
+          equipmentId={selectedEquipmentId}
+          investigationId={selectedInvestigation?.id ?? null}
+          onSeeded={() => { if (selectedInvestigation) loadNodes(selectedInvestigation.id); }}
+          onClose={() => setCoachOpen(false)}
+        />
       )}
 
       <ConfirmDialog

@@ -3,6 +3,7 @@ use sqlx::SqlitePool;
 use tauri::State;
 use uuid::Uuid;
 use crate::models::AuditLog;
+use crate::session::{SessionState, enforce};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,8 +47,10 @@ pub async fn record_audit(
 #[tauri::command]
 pub async fn create_audit_log(
     pool: State<'_, SqlitePool>,
+    session: State<'_, SessionState>,
     payload: CreateAuditPayload,
 ) -> Result<AuditLog, String> {
+    enforce(&session, "Engineer")?;
     let id = record_audit(
         &pool,
         &payload.entity_type,

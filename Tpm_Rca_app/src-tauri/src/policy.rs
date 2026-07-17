@@ -33,6 +33,9 @@ lazy_static! {
         m.insert("pm", Role::Technician);
         m.insert("dashboard", Role::Engineer);
         m.insert("downtime", Role::Technician);
+        m.insert("cbm", Role::Engineer);
+        m.insert("inventory", Role::Engineer);
+        m.insert("wo", Role::Technician);
         // Add more permissions here as new modules are introduced.
         m
     };

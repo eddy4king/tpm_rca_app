@@ -25,10 +25,11 @@ import {
   trClass,
 } from "../components/ui";
 import {
-  Search, Plus, Pencil, Trash2, Cog, ChevronLeft, Layers, Download, QrCode as QrIcon, Upload,
+  Search, Plus, Pencil, Trash2, Cog, ChevronLeft, Layers, Download, QrCode as QrIcon, Upload, ClipboardList,
 } from "lucide-react";
 import { exportToCsv } from "../lib/export";
 import { parseCsv, normalizeHeader } from "../lib/csv";
+import { downtimeCost, formatCurrency } from "../lib/finance";
 import QrCode, { equipmentQrValue, parseEquipmentQr } from "../components/QrCode";
 
 interface Equipment {
@@ -42,6 +43,8 @@ interface Equipment {
   equipment_type: string | null;
   parent_id: string | null;
   area_id: string | null;
+  cost_per_hour: number | null;
+  asset_value: number | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -59,6 +62,8 @@ interface ImportRow {
   equipment_type: string | null;
   parent_id: string | null;
   area_id: string | null;
+  cost_per_hour: number | null;
+  asset_value: number | null;
 }
 
 const VALID_STATUS = ["Running", "Standby", "Under Maintenance", "Failed"];
@@ -74,6 +79,8 @@ const FIELD_ALIASES: Record<keyof ImportRow, string[]> = {
   area_id: ["area", "areaid", "arename"],
   description: ["description", "desc", "notes", "remarks"],
   parent_id: ["parent", "parentid", "parenttag"],
+  cost_per_hour: ["costperhour", "costperhr", "hourlycost", "rate", "costhour"],
+  asset_value: ["assetvalue", "value", "capitalcost", "bookvalue", "replacementvalue"],
 };
 
 const IMPORT_FIELDS: { key: keyof ImportRow; label: string; required: boolean; hint?: string }[] = [
@@ -86,6 +93,8 @@ const IMPORT_FIELDS: { key: keyof ImportRow; label: string; required: boolean; h
   { key: "area_id", label: "Area", required: false, hint: "Area name or ID (matches export)" },
   { key: "description", label: "Description", required: false },
   { key: "parent_id", label: "Parent ID/Tag", required: false },
+  { key: "cost_per_hour", label: "Cost / Hour", required: false, hint: "Downtime cost per operating hour (number)" },
+  { key: "asset_value", label: "Asset Value", required: false, hint: "Capital / replacement value (number)" },
 ];
 
 function normalizeValue(value: string | undefined, fallback: string): string {
@@ -103,6 +112,13 @@ function normalizeCriticality(value: string | undefined): string {
   return VALID_CRITICALITY.includes(v) ? v : "Medium";
 }
 
+function parseNum(value: string | undefined): number | null {
+  const v = (value || "").trim();
+  if (v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 const defaultForm = {
   tag_number: "",
   name: "",
@@ -113,6 +129,8 @@ const defaultForm = {
   equipment_type: "",
   parent_id: "",
   area_id: "",
+  cost_per_hour: "",
+  asset_value: "",
 };
 
 function getCriticalityColor(criticality: string | null) {
@@ -142,6 +160,7 @@ function EquipmentPage() {
   const [plants, setPlants] = useState<Plant[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEquipment, setSelectedEquipment] = useState<Equipment | null>(null);
+  const [selectedFinance, setSelectedFinance] = useState<{ downtime_minutes: number; downtime_cost: number } | null>(null);
 
   const [mapOpen, setMapOpen] = useState(false);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -149,6 +168,7 @@ function EquipmentPage() {
   const [mapping, setMapping] = useState<Record<keyof ImportRow, number>>({
     tag_number: -1, name: -1, equipment_type: -1, status: -1,
     criticality: -1, location: -1, area_id: -1, description: -1, parent_id: -1,
+    cost_per_hour: -1, asset_value: -1,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -163,6 +183,9 @@ function EquipmentPage() {
   });
 
   const [form, setForm] = useState(defaultForm);
+  const [selectedPlant, setSelectedPlant] = useState("");
+  const [newAreaOpen, setNewAreaOpen] = useState(false);
+  const [newAreaName, setNewAreaName] = useState("");
 
   const stats = useMemo(() => ({
     total: equipment.length,
@@ -197,6 +220,36 @@ function EquipmentPage() {
     return `${plant?.name || "Plant"} / ${a.name || "Area"}`;
   }
 
+  const areasForSelectedPlant = useMemo(
+    () => areas.filter((a) => a.plant_id === selectedPlant),
+    [areas, selectedPlant]
+  );
+
+  function handlePlantChange(plantId: string) {
+    setSelectedPlant(plantId);
+    if (form.area_id) {
+      const a = areas.find((x) => x.id === form.area_id);
+      if (!a || a.plant_id !== plantId) setForm((f) => ({ ...f, area_id: "" }));
+    }
+  }
+
+  async function handleCreateAreaInline() {
+    const name = newAreaName.trim();
+    if (!name || !selectedPlant) return;
+    try {
+      const area = await invoke<Area>("create_area", {
+        payload: { plantId: selectedPlant, name, code: null, description: null },
+      });
+      await loadEquipment();
+      setForm((f) => ({ ...f, area_id: area.id }));
+      setNewAreaName("");
+      setNewAreaOpen(false);
+      toast.success(`Area "${area.name}" created`);
+    } catch (err) {
+      toast.error(`Failed to create area: ${err}`);
+    }
+  }
+
   const loadEquipment = useCallback(async () => {
     try {
       setLoading(true);
@@ -217,6 +270,28 @@ function EquipmentPage() {
 
   useEffect(() => { loadEquipment(); }, [loadEquipment]);
 
+  useEffect(() => {
+    if (!selectedEquipment) { setSelectedFinance(null); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const dt = await invoke<{ duration_minutes: number | null }[]>(
+          "get_equipment_downtime",
+          { equipmentId: selectedEquipment.id }
+        );
+        if (!alive) return;
+        const mins = dt.reduce((a, d) => a + (d.duration_minutes || 0), 0);
+        setSelectedFinance({
+          downtime_minutes: mins,
+          downtime_cost: downtimeCost(mins, selectedEquipment.cost_per_hour),
+        });
+      } catch {
+        if (alive) setSelectedFinance(null);
+      }
+    })();
+    return () => { alive = false; };
+  }, [selectedEquipment]);
+
   function resetForm() {
     setForm(defaultForm);
     setUi((prev) => ({ ...prev, editingId: null }));
@@ -229,12 +304,14 @@ function EquipmentPage() {
           tagNumber: form.tag_number,
           name: form.name,
           description: form.description || null,
-          location: form.location || null,
+          location: form.location || "",
           criticality: form.criticality,
           status: form.status,
           equipmentType: form.equipment_type || null,
           parentId: form.parent_id || null,
           areaId: form.area_id || null,
+          costPerHour: form.cost_per_hour ? Number(form.cost_per_hour) : null,
+          assetValue: form.asset_value ? Number(form.asset_value) : null,
         },
       });
       await loadEquipment();
@@ -261,6 +338,8 @@ function EquipmentPage() {
           equipmentType: form.equipment_type || null,
           parentId: form.parent_id || null,
           areaId: form.area_id || null,
+          costPerHour: form.cost_per_hour ? Number(form.cost_per_hour) : null,
+          assetValue: form.asset_value ? Number(form.asset_value) : null,
         },
       });
       await loadEquipment();
@@ -313,6 +392,8 @@ function EquipmentPage() {
       area_id: find(FIELD_ALIASES.area_id),
       description: find(FIELD_ALIASES.description),
       parent_id: find(FIELD_ALIASES.parent_id),
+      cost_per_hour: find(FIELD_ALIASES.cost_per_hour),
+      asset_value: find(FIELD_ALIASES.asset_value),
     };
   }
 
@@ -339,6 +420,8 @@ function EquipmentPage() {
         area_id: map.area_id >= 0 ? resolveArea((r[map.area_id] || "").trim()) : null,
         description: map.description >= 0 ? (r[map.description] || "").trim() || null : null,
         parent_id: map.parent_id >= 0 ? (r[map.parent_id] || "").trim() || null : null,
+        cost_per_hour: map.cost_per_hour >= 0 ? parseNum(r[map.cost_per_hour]) : null,
+        asset_value: map.asset_value >= 0 ? parseNum(r[map.asset_value]) : null,
       });
     }
     return { rows: out, skipped };
@@ -355,6 +438,8 @@ function EquipmentPage() {
       { key: "area_id", label: "Area" },
       { key: "description", label: "Description" },
       { key: "parent_id", label: "Parent ID" },
+      { key: "cost_per_hour", label: "Cost/Hour" },
+      { key: "asset_value", label: "Asset Value" },
     ]);
   }
 
@@ -424,6 +509,8 @@ function EquipmentPage() {
   }
 
   function handleEdit(eq: Equipment) {
+    const plantOfEq = areas.find((a) => a.id === eq.area_id)?.plant_id || "";
+    setSelectedPlant(plantOfEq);
     setForm({
       tag_number: eq.tag_number || "",
       name: eq.name || "",
@@ -434,6 +521,8 @@ function EquipmentPage() {
       equipment_type: eq.equipment_type || "",
       parent_id: eq.parent_id || "",
       area_id: eq.area_id || "",
+      cost_per_hour: eq.cost_per_hour != null ? String(eq.cost_per_hour) : "",
+      asset_value: eq.asset_value != null ? String(eq.asset_value) : "",
     });
     setUi((prev) => ({ ...prev, editingId: eq.id, showForm: true }));
     setSelectedEquipment(null);
@@ -484,6 +573,16 @@ function EquipmentPage() {
             <Info label="Parent Equipment" value={eq.parent_id} />
             <Info label="Created" value={eq.created_at} />
             <Info label="Updated" value={eq.updated_at} />
+            <Info label="Cost / Hour" value={eq.cost_per_hour != null ? formatCurrency(eq.cost_per_hour) : "—"} />
+            <Info label="Asset Value" value={eq.asset_value != null ? formatCurrency(eq.asset_value) : "—"} />
+            <div className="col-span-2 md:col-span-3 border-t border-slate-100 pt-5">
+              <p className="text-sm text-slate-500 mb-1">Downtime cost (logged)</p>
+              <p className="text-2xl font-bold text-rose-600">{formatCurrency(selectedFinance?.downtime_cost ?? 0)}</p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {selectedFinance?.downtime_minutes ?? 0} min of logged downtime
+                {eq.cost_per_hour == null && " — set a Cost / Hour to value it"}
+              </p>
+            </div>
             <div className="col-span-2 md:col-span-3">
               <p className="text-sm text-slate-500">Description</p>
               <p className="font-medium mt-1 whitespace-pre-wrap leading-relaxed text-slate-700">
@@ -504,6 +603,28 @@ function EquipmentPage() {
             <div className="flex gap-3 px-6 pb-6">
               <Button variant="edit" onClick={() => handleEdit(eq)}>
                 <Pencil className="w-4 h-4" /> Edit Equipment
+              </Button>
+              <Button variant="secondary" onClick={async () => {
+                try {
+                  await invoke("create_wo", {
+                    payload: {
+                      title: `Maintenance — ${eq.tag_number || eq.name}`,
+                      description: null,
+                      equipmentId: eq.id,
+                      woType: "corrective",
+                      priority: "medium",
+                      assignedTo: null,
+                      plannedStart: null,
+                      dueDate: null,
+                      approvalStatus: "none",
+                    },
+                  });
+                  toast.success("Work order created for this asset");
+                } catch (err) {
+                  toast.error(`Could not create work order: ${err}`);
+                }
+              }}>
+                <ClipboardList className="w-4 h-4" /> Create Work Order
               </Button>
               <Button variant="danger" onClick={() => handleDelete(eq.id)}>
                 <Trash2 className="w-4 h-4" /> Delete Equipment
@@ -627,6 +748,32 @@ function EquipmentPage() {
         </Modal>
       )}
 
+      {newAreaOpen && (
+        <Modal title="New Area" onClose={() => setNewAreaOpen(false)} maxWidth="max-w-sm">
+          <div className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Create a new area under{" "}
+              <span className="font-medium text-slate-700">
+                {plants.find((p) => p.id === selectedPlant)?.name || "this plant"}
+              </span>.
+            </p>
+            <Field label="Area Name">
+              <Input
+                autoFocus
+                placeholder="e.g. Production Line A"
+                value={newAreaName}
+                onChange={(e) => setNewAreaName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleCreateAreaInline()}
+              />
+            </Field>
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={() => setNewAreaOpen(false)}>Cancel</Button>
+              <Button onClick={handleCreateAreaInline} disabled={!newAreaName.trim()}>Create Area</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       <PageHeader
         title="Equipment Register"
         subtitle="Centralized industrial equipment management"
@@ -655,6 +802,8 @@ function EquipmentPage() {
                   { key: "area_id", label: "Area", format: (v) => areaLabel(v as string | null) },
                   { key: "description", label: "Description" },
                   { key: "created_at", label: "Created At" },
+                  { key: "cost_per_hour", label: "Cost/Hour", format: (v) => (v as number | null) ?? "" },
+                  { key: "asset_value", label: "Asset Value", format: (v) => (v as number | null) ?? "" },
                 ]);
                 toast.success(`Exported ${filteredEquipment.length} equipment records`);
               }}
@@ -735,20 +884,47 @@ function EquipmentPage() {
                   <option>Running</option><option>Standby</option><option>Under Maintenance</option><option>Failed</option>
                 </Select>
               </Field>
-              <Field label="Plant / Area" className="col-span-2">
-                <Select value={form.area_id} onChange={(e) => setForm({ ...form, area_id: e.target.value })}>
-                  <option value="">No Area (unassigned)</option>
+              <Field label="Plant" className="col-span-2 sm:col-span-1">
+                <Select value={selectedPlant} onChange={(e) => handlePlantChange(e.target.value)}>
+                  <option value="">No Plant (unassigned)</option>
                   {plants.map((p) => (
-                    <optgroup key={p.id} label={p.name || "Plant"}>
-                      {areas.filter((a) => a.plant_id === p.id).map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
-                    </optgroup>
+                    <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </Select>
               </Field>
+              <Field label="Area" className="col-span-2 sm:col-span-1">
+                <div className="flex gap-2">
+                  <Select
+                    value={form.area_id}
+                    onChange={(e) => setForm({ ...form, area_id: e.target.value })}
+                    className="flex-1"
+                  >
+                    <option value="">No Area (unassigned)</option>
+                    {areasForSelectedPlant.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </Select>
+                  {canEditEquipment && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setNewAreaOpen(true)}
+                      disabled={!selectedPlant}
+                      title={selectedPlant ? "Add area to selected plant" : "Select a plant first"}
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+              </Field>
               <Field label="Parent Equipment ID (optional)" className="col-span-2">
                 <Input placeholder="Parent Equipment ID (optional)" value={form.parent_id} onChange={(e) => setForm({ ...form, parent_id: e.target.value })} />
+              </Field>
+              <Field label="Cost / Hour">
+                <Input type="number" placeholder="0.00" value={form.cost_per_hour} onChange={(e) => setForm({ ...form, cost_per_hour: e.target.value })} />
+              </Field>
+              <Field label="Asset Value">
+                <Input type="number" placeholder="0.00" value={form.asset_value} onChange={(e) => setForm({ ...form, asset_value: e.target.value })} />
               </Field>
               <Field label="Description" className="col-span-2">
                 <Textarea placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />

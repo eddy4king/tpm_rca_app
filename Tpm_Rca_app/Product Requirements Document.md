@@ -203,4 +203,39 @@ Full build notes, file targets and suggested order are in **`ROADMAP.md`**.
 
 **Suggested build order:** 1 → 2 → 5 → 3 → 4 → 6 → 7.
 
+## 13. Phased Delivery Roadmap
+
+Combines the transactional CMMS gaps (inventory, work orders, etc.) identified in the
+gap analysis with the competitive differentiators from §12 into four delivery phases.
+Features already shipped — Authentication, RBAC, Equipment Register, Downtime, RCA,
+FMEA, CAPA, CbM, PM Scheduler, KPI/OEE Dashboard, Audit Log, Knowledge Base, AI RCA
+Coach, Offline‑first Sync, i18n and Theming — are excluded below.
+
+### Phase 1 — Transactional CMMS Core (highest priority)
+*Goal: make the product viable as a day‑to‑day work‑management system.*
+- **Spare‑Parts & Inventory** — stock items, min/max levels, reorder alerts, issue/return against work orders.
+- **Unified Work Orders** — single WO entity linking PM / downtime / tasks with labor, parts, cost and approvals (replaces the current separate lists).
+- **Notification & Alert Engine** — email / SMS / push plus auto‑triggers (PM due, CbM threshold breach, overdue work orders); extends the existing in‑app toasts.
+
+### Phase 2 — Reporting & Enterprise Readiness
+- **PDF & Scheduled Reports** — printable work‑order / history / audit reports and scheduled delivery (today only CSV export exists).
+- **SSO / OAuth / LDAP** — enterprise login alongside local accounts.
+- **Labor & Timesheet Capture** — actual time and cost on work orders (extends the existing `assigned_to`).
+- **Calendar / Gantt View** — visual PM & work‑order scheduling (today list‑only).
+
+### Phase 3 — Integrations & Mobility
+- **ERP / SCADA / IIoT Connectors** — SAP, IBM Maximo, OSIsoft PI beyond the generic webhook; the existing PostgreSQL sync remains the open sync target.
+- **Mobile / PWA Field App** — offline‑first technician client with camera QR / NFC lookup (builds on the current offline‑first architecture).
+- **Vendor / Warranty / Contract Management** — link assets to suppliers, warranties and service contracts.
+
+### Phase 4 — Advanced TPM Differentiators (from §12)
+- **Zero‑Friction Shop‑Floor Capture** (§12‑5): voice entry, one‑tap downtime, NFC.
+- **TPM Culture Features** (§12‑6): OEE leaderboards per line, Kaizen/CIP board, operator recognition.
+- **Open & Portable by Default** (§12‑7): self‑hosted sync, full export, no per‑seat lock‑in.
+- **Structured Work Checklists / SOP** — store checklists against work orders / PM (today only AI‑suggested).
+- **Permit‑to‑Work / LOTO / Safety** — optional safety gate before high‑risk work.
+
+### Recommended sequence
+Phase 1 → Phase 2 (Reporting + SSO) → Phase 3 (Integrations first, then Mobile) → Phase 4.
+
 End of Document

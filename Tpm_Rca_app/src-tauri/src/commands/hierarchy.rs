@@ -4,6 +4,7 @@ use tauri::State;
 use uuid::Uuid;
 use crate::models::{Plant, Area};
 use crate::commands::audit::record_audit;
+use crate::session::{SessionState, enforce};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,8 +47,10 @@ pub struct UpdateAreaPayload {
 #[tauri::command]
 pub async fn create_plant(
     pool: State<'_, SqlitePool>,
+    session: State<'_, SessionState>,
     payload: CreatePlantPayload,
 ) -> Result<Plant, String> {
+    enforce(&session, "Engineer")?;
     let id = Uuid::new_v4().to_string();
 
     sqlx::query(
@@ -89,8 +92,10 @@ pub async fn get_all_plants(
 #[tauri::command]
 pub async fn update_plant(
     pool: State<'_, SqlitePool>,
+    session: State<'_, SessionState>,
     payload: UpdatePlantPayload,
 ) -> Result<Plant, String> {
+    enforce(&session, "Engineer")?;
     sqlx::query(
         "UPDATE plants SET
             name = COALESCE(?1, name),
@@ -122,8 +127,10 @@ pub async fn update_plant(
 #[tauri::command]
 pub async fn delete_plant(
     pool: State<'_, SqlitePool>,
+    session: State<'_, SessionState>,
     id: String,
 ) -> Result<(), String> {
+    enforce(&session, "Engineer")?;
     sqlx::query("DELETE FROM plants WHERE id = ?1")
         .bind(&id)
         .execute(&*pool)
@@ -138,8 +145,10 @@ pub async fn delete_plant(
 #[tauri::command]
 pub async fn create_area(
     pool: State<'_, SqlitePool>,
+    session: State<'_, SessionState>,
     payload: CreateAreaPayload,
 ) -> Result<Area, String> {
+    enforce(&session, "Engineer")?;
     let id = Uuid::new_v4().to_string();
 
     sqlx::query(
@@ -195,8 +204,10 @@ pub async fn get_all_areas(
 #[tauri::command]
 pub async fn update_area(
     pool: State<'_, SqlitePool>,
+    session: State<'_, SessionState>,
     payload: UpdateAreaPayload,
 ) -> Result<Area, String> {
+    enforce(&session, "Engineer")?;
     sqlx::query(
         "UPDATE areas SET
             plant_id = COALESCE(?1, plant_id),
@@ -228,8 +239,10 @@ pub async fn update_area(
 #[tauri::command]
 pub async fn delete_area(
     pool: State<'_, SqlitePool>,
+    session: State<'_, SessionState>,
     id: String,
 ) -> Result<(), String> {
+    enforce(&session, "Engineer")?;
     sqlx::query("DELETE FROM areas WHERE id = ?1")
         .bind(&id)
         .execute(&*pool)

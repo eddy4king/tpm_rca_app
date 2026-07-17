@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import {
   Plus, Wrench, Calendar, User, Clock3, CheckCircle2,
-  Pencil, Trash2, Search, Paperclip, X,
+  Pencil, Trash2, Search, Paperclip, X, ClipboardList,
 } from "lucide-react";
 import { PriorityBadge } from "../components/indicators";
 import {
@@ -68,6 +70,9 @@ function getNextDueDate(frequency: string, from: Date = new Date()): string {
 }
 
 function PMSchedulePage() {
+  const { canEdit } = useAuth();
+  const toast = useToast();
+  const canManagePm = canEdit("Technician");
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [schedules, setSchedules] = useState<PmSchedule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -350,6 +355,30 @@ function PMSchedulePage() {
                       <p className="text-sm text-slate-500 line-clamp-2">{pm.description || "No description"}</p>
                     </div>
                     <div className="flex gap-2">
+                      {canManagePm && (
+                      <IconButton variant="edit" label="Create Work Order" onClick={async () => {
+                        try {
+                          await invoke("create_wo", {
+                            payload: {
+                              title: `PM — ${pm.title || "scheduled task"}`,
+                              description: pm.description,
+                              equipmentId: pm.equipment_id,
+                              woType: "preventive",
+                              priority: pm.priority || "medium",
+                              assignedTo: pm.assigned_to,
+                              plannedStart: null,
+                              dueDate: pm.next_due_date,
+                              approvalStatus: "none",
+                            },
+                          });
+                          toast.success("Preventive work order created");
+                        } catch (err) {
+                          toast.error(`Could not create work order: ${err}`);
+                        }
+                      }}>
+                        <ClipboardList className="w-4 h-4" />
+                      </IconButton>
+                      )}
                       <IconButton variant="edit" label="Edit" onClick={() => openEdit(pm)}>
                         <Pencil className="w-4 h-4" />
                       </IconButton>

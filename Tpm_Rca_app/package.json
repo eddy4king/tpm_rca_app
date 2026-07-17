@@ -16,6 +16,7 @@
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-opener": "^2",
     "axios": "^1.16.0",
+    "jspdf": "^2.5.2",
     "lucide-react": "^1.16.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.1.0",

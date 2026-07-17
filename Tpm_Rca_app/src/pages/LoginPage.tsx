@@ -129,13 +129,16 @@ function LoginPage() {
 
   if (mode === "loading") {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-8">
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center gap-8">
         <img
           src={projectImage}
           alt="TPM-RCA Pro"
-          className="w-48 h-48 object-contain rounded-3xl shadow-2xl"
+          className="w-56 h-80 object-contain rounded-3xl shadow-2xl"
         />
-        <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin" />
+        <div className="flex flex-col gap-6">
+          <h1 className="text-4xl font-bold text-white leading-tight">TPM-RCA Pro</h1>
+          <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin" />
+        </div>
       </div>
     );
   }

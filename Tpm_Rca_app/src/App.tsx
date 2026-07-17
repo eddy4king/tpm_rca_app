@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import projectImage from "../project-image.png";
+import projectImage from "../project-image.jpeg";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { useRole } from "./context/RoleContext";
 import EquipmentPage from "./pages/EquipmentPage";
@@ -13,13 +13,22 @@ import TasksPage from "./pages/TasksPage";
 import TimelinePage from "./pages/TimelinePage";
 import AuditPage from "./pages/AuditPage";
 import SyncPage from "./pages/SyncPage";
+import FmeaPage from "./pages/FmeaPage";
+import CbmPage from "./pages/CbmPage";
+import KnowledgePage from "./pages/KnowledgePage";
+import FinancialsPage from "./pages/FinancialsPage";
+import InventoryPage from "./pages/InventoryPage";
+import WorkOrdersPage from "./pages/WorkOrdersPage";
+import TimesheetsPage from "./pages/TimesheetsPage";
+import SchedulePage from "./pages/SchedulePage";
+import ReportsPage from "./pages/ReportsPage";
 
 import UsersPage from "./pages/UsersPage";
 import LoginPage from "./pages/LoginPage";
 import Sidebar from "./components/Sidebar";
 import { TourProvider } from "./context/TourContext";
 
-type Page = "equipment" | "downtime" | "rca" | "capa" | "dashboard" | "pm" | "hierarchy" | "tasks" | "timeline" | "audit" | "sync" | "users";
+type Page = "equipment" | "downtime" | "rca" | "capa" | "dashboard" | "pm" | "hierarchy" | "tasks" | "timeline" | "audit" | "sync" | "fmea" | "cbm" | "knowledge" | "financials" | "inventory" | "workorders" | "timesheets" | "schedule" | "reports" | "users";
 
 function AppInner() {
   const { user, isAdmin, isLoading } = useAuth();
@@ -36,13 +45,16 @@ function AppInner() {
   }, [activePage]);
 
   if (isLoading || roleLoading) return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-8">
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center gap-8">
       <img
         src={projectImage}
         alt="TPM-RCA Pro"
-        className="w-48 h-48 object-contain rounded-3xl shadow-2xl"
+        className="w-56 h-80 object-contain rounded-3xl shadow-2xl"
       />
-      <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin" />
+      <div className="flex flex-col gap-6">
+        <h1 className="text-4xl font-bold text-white leading-tight">TPM-RCA Pro</h1>
+        <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin" />
+      </div>
     </div>
   );
 
@@ -60,6 +72,15 @@ function AppInner() {
     { key: "tasks", label: "Tasks" },
     { key: "timeline", label: "Timeline" },
     { key: "audit", label: "Audit" },
+    { key: "fmea", label: "FMEA" },
+    { key: "cbm", label: "CBM" },
+    { key: "knowledge", label: "Knowledge" },
+    { key: "financials", label: "Financials" },
+    { key: "inventory", label: "Inventory" },
+    { key: "workorders", label: "Work Orders" },
+    { key: "timesheets", label: "Timesheets" },
+    { key: "schedule", label: "Schedule" },
+    { key: "reports", label: "Reports" },
     { key: "sync", label: "Sync" },
   ] as const;
 
@@ -91,6 +112,15 @@ function AppInner() {
           {activePage === "timeline" && <TimelinePage />}
           {activePage === "audit" && <AuditPage />}
           {activePage === "sync" && <SyncPage />}
+          {activePage === "fmea" && <FmeaPage />}
+          {activePage === "cbm" && <CbmPage />}
+          {activePage === "knowledge" && <KnowledgePage />}
+          {activePage === "financials" && <FinancialsPage />}
+          {activePage === "inventory" && <InventoryPage />}
+          {activePage === "workorders" && <WorkOrdersPage />}
+          {activePage === "timesheets" && <TimesheetsPage />}
+          {activePage === "schedule" && <SchedulePage onNavigate={(p) => setActivePage(p as Page)} />}
+          {activePage === "reports" && <ReportsPage />}
 
           {activePage === "users" && <UsersPage />}
         </main>

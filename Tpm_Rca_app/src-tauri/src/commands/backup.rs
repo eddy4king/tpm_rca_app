@@ -2,6 +2,7 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tauri::State;
+use crate::session::{SessionState, enforce};
 
 /// Tables whose data is copied during a restore. Session/sync/bookkeeping
 /// tables are intentionally excluded so the current login stays valid and the
@@ -58,7 +59,8 @@ fn sql_quote(path: &str) -> String {
 /// Creates a consistent, portable copy of the database using `VACUUM INTO`.
 /// Returns the absolute path of the created backup file.
 #[tauri::command]
-pub async fn backup_database(pool: State<'_, SqlitePool>) -> Result<String, String> {
+pub async fn backup_database(pool: State<'_, SqlitePool>, session: State<'_, SessionState>) -> Result<String, String> {
+    enforce(&session, "Admin")?;
     let dir = backups_dir()?;
     let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let dest = dir.join(format!("tpm_rca_backup_{}.db", stamp));
@@ -81,7 +83,8 @@ pub async fn backup_database(pool: State<'_, SqlitePool>) -> Result<String, Stri
 
 /// Lists all available backup files, newest first.
 #[tauri::command]
-pub async fn list_backups() -> Result<Vec<BackupInfo>, String> {
+pub async fn list_backups(session: State<'_, SessionState>) -> Result<Vec<BackupInfo>, String> {
+    enforce(&session, "Admin")?;
     let dir = backups_dir()?;
     let mut backups: Vec<BackupInfo> = Vec::new();
 
@@ -109,8 +112,10 @@ pub async fn list_backups() -> Result<Vec<BackupInfo>, String> {
 #[tauri::command]
 pub async fn restore_database(
     pool: State<'_, SqlitePool>,
+    session: State<'_, SessionState>,
     path: String,
 ) -> Result<String, String> {
+    enforce(&session, "Admin")?;
     // Basic validation: the file must exist and be a SQLite database.
     let file = PathBuf::from(&path);
     if !file.exists() {

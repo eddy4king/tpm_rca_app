@@ -11,7 +11,6 @@ export const EQUIPMENT_STATUS: Record<string, { dot: string; badge: string; live
   Standby: { dot: "bg-blue-500", badge: "bg-blue-100 text-blue-700 border-blue-200" },
   "Under Maintenance": { dot: "bg-amber-500", badge: "bg-amber-100 text-amber-700 border-amber-200" },
   Failed: { dot: "bg-red-500", badge: "bg-red-100 text-red-700 border-red-200", live: true },
-  Maintenance: { dot: "bg-amber-500", badge: "bg-amber-100 text-amber-700 border-amber-200" },
 };
 
 export const DOWNTIME_STATUS: Record<string, { dot: string; badge: string }> = {

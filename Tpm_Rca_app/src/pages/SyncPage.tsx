@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   RefreshCw, Database, CloudUpload, CloudDownload,
   CheckCircle2, XCircle, Clock3, AlertTriangle, Settings,
-  HardDrive, Save, RotateCcw,
+  HardDrive, Save, RotateCcw, Wifi, Share2,
 } from "lucide-react";
 import {
   PageHeader, Card, Input, Button, StatCard, LoadingState, ConfirmDialog,
@@ -57,6 +57,12 @@ function SyncPage() {
   const [backingUp, setBackingUp] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupInfo | null>(null);
   const [restoring, setRestoring] = useState(false);
+
+  // Peer (LAN) sync state
+  const [peerExportPath, setPeerExportPath] = useState("peer_snapshots/snapshot.db");
+  const [peerMergePath, setPeerMergePath] = useState("");
+  const [discovering, setDiscovering] = useState(false);
+  const [peerIps, setPeerIps] = useState<string[]>([]);
 
   useEffect(() => { loadData(); }, []);
 
@@ -167,6 +173,47 @@ function SyncPage() {
       showMessage(String(err), "error");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleExportPeer() {
+    try {
+      const path = await invoke<string>("export_peer_snapshot", { path: peerExportPath });
+      showMessage(`Peer snapshot exported to ${path}`, "success");
+    } catch (err) {
+      showMessage(String(err), "error");
+    }
+  }
+
+  async function handleMergePeer() {
+    if (!peerMergePath.trim()) {
+      showMessage("Enter the path to the peer's database file.", "error");
+      return;
+    }
+    try {
+      const result = await invoke<string>("merge_peer_database", { peerPath: peerMergePath.trim() });
+      showMessage(result, "success");
+      loadData();
+    } catch (err) {
+      showMessage(String(err), "error");
+    }
+  }
+
+  async function handleDiscover() {
+    try {
+      setDiscovering(true);
+      const ips = await invoke<string[]>("discover_peers", { timeoutMs: 2500 });
+      setPeerIps(ips);
+      showMessage(
+        ips.length
+          ? `Found ${ips.length} peer instance(s) on the LAN.`
+          : "No peers found. Check the firewall allows UDP 41371, or exchange the snapshot file manually.",
+        ips.length ? "success" : "error"
+      );
+    } catch (err) {
+      showMessage(String(err), "error");
+    } finally {
+      setDiscovering(false);
     }
   }
 
@@ -383,6 +430,60 @@ function SyncPage() {
               ))}
             </div>
           )}
+        </Card>
+
+        {/* PEER (LAN) SYNC */}
+        <Card>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Share2 className="w-5 h-5 text-slate-500" />
+              <h3 className="font-bold text-lg">Peer Sync (LAN, no server)</h3>
+            </div>
+            <Button variant="secondary" size="sm" onClick={handleDiscover} disabled={discovering}>
+              <Wifi className={`w-4 h-4 ${discovering ? "animate-pulse" : ""}`} />
+              {discovering ? "Scanning…" : "Discover peers"}
+            </Button>
+          </div>
+
+          <p className="text-sm text-slate-500 mb-4">
+            Reconcile two installs of TPM-RCA without any server. Export a snapshot,
+            hand it to a colleague (USB / network share), and merge it here. Login and
+            PostgreSQL settings are kept on each device.
+          </p>
+
+          {peerIps.length > 0 && (
+            <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-800">
+              Peers detected on the LAN: {peerIps.join(", ")}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-xl border border-slate-200 p-4">
+              <p className="text-sm font-semibold text-slate-700 mb-2">1. Export snapshot</p>
+              <Input
+                value={peerExportPath}
+                onChange={(e) => setPeerExportPath(e.target.value)}
+                placeholder="peer_snapshots/snapshot.db"
+                className="font-mono text-xs mb-3"
+              />
+              <Button variant="secondary" className="w-full" onClick={handleExportPeer}>
+                <CloudUpload className="w-4 h-4" /> Export snapshot
+              </Button>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 p-4">
+              <p className="text-sm font-semibold text-slate-700 mb-2">2. Merge peer database</p>
+              <Input
+                value={peerMergePath}
+                onChange={(e) => setPeerMergePath(e.target.value)}
+                placeholder="Path to colleague's snapshot.db"
+                className="font-mono text-xs mb-3"
+              />
+              <Button variant="secondary" className="w-full" onClick={handleMergePeer}>
+                <CloudDownload className="w-4 h-4" /> Merge peer data
+              </Button>
+            </div>
+          </div>
         </Card>
 
         {/* HOW IT WORKS */}

@@ -13,7 +13,8 @@ pub struct RoleInfo {
 fn all_pages() -> Vec<String> {
     vec![
         "dashboard", "equipment", "hierarchy", "downtime", "rca", "capa",
-        "pm", "tasks", "timeline", "audit", "sync",
+        "pm", "tasks", "timeline", "audit", "fmea", "cbm", "sync", "knowledge", "financials",
+        "inventory", "workorders", "timesheets", "schedule", "reports",
     ]
     .into_iter()
     .map(|s| s.to_string())

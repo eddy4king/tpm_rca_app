@@ -18,6 +18,9 @@ pub async fn sync_all(sqlite: State<'_, SqlitePool>) -> Result<String, String> {
 
 use sqlx::{SqlitePool, postgres::PgPoolOptions};
 use uuid::Uuid;
+use std::net::UdpSocket;
+use std::time::{Duration, Instant};
+use std::collections::HashSet;
 use crate::models::{
     SyncConfig, SyncLog,
     Equipment, Downtime, RcaInvestigation, RcaNode, CAPA, PmSchedule,
@@ -505,4 +508,156 @@ fn get_update_clause(table: &str) -> String {
         "pm_schedule" => "title=EXCLUDED.title, status=EXCLUDED.status, next_due_date=EXCLUDED.next_due_date, last_completed_at=EXCLUDED.last_completed_at",
         _ => "id=EXCLUDED.id",
     }.to_string()
+}
+
+// ── Peer (LAN) sync ────────────────────────────────────────────────────────
+//
+// Zero-infrastructure sync: a plant can reconcile two installs of TPM-RCA
+// without any server. One side "exports a snapshot" (a copy of its SQLite
+// file); the other "merges" that copy. Merge is by primary key (id) with
+// last-writer-wins, so the same record edited on both sides keeps whichever
+// copy is in the imported file. Auth/session/sync-config state is intentionally
+// excluded so each device keeps its own login and PostgreSQL target.
+
+const PEER_PORT: u16 = 41371;
+const DISCOVER_MSG: &[u8] = b"TPM-RCA-DISCOVER";
+const HERE_MSG: &[u8] = b"TPM-RCA-HERE";
+
+/// Writes a self-contained copy of the current database to `path` using
+/// SQLite's `VACUUM INTO`, which produces a clean, compact snapshot.
+pub async fn export_peer_snapshot(
+    pool: &SqlitePool,
+    path: String,
+) -> Result<String, String> {
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // VACUUM INTO refuses to overwrite an existing file.
+    let _ = std::fs::remove_file(&path);
+    let escaped = path.replace('\'', "''");
+    sqlx::query(&format!("VACUUM INTO '{}'", escaped))
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Failed to export snapshot: {}", e))?;
+    Ok(path)
+}
+
+/// Merges every user table from the peer database file at `peer_path` into the
+/// local database. Internal tables (migrations, sessions, sync config/log) are
+/// skipped so local login and PostgreSQL configuration are preserved.
+pub async fn merge_peer_database(
+    pool: &SqlitePool,
+    peer_path: String,
+) -> Result<String, String> {
+    if !std::path::Path::new(&peer_path).exists() {
+        return Err("Peer database file not found".into());
+    }
+
+    sqlx::query("ATTACH DATABASE ? AS peerdb")
+        .bind(&peer_path)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("Failed to attach peer database: {}", e))?;
+
+    let tables: Vec<(String,)> = sqlx::query_as(
+        "SELECT name FROM peerdb.sqlite_master WHERE type='table' \
+         AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_sqlx_%' \
+         AND name NOT IN ('sync_config','sync_log','sessions')",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut processed = 0usize;
+    let mut total_rows = 0usize;
+    for (name,) in &tables {
+        // Column list comes from the local (main) schema; peer shares it.
+        let cols: Vec<(i64, String, String, i64, Option<String>, i64)> =
+            sqlx::query_as(&format!("PRAGMA table_info(\"{}\")", name))
+                .fetch_all(pool)
+                .await
+                .map_err(|e| e.to_string())?;
+        if cols.is_empty() {
+            continue; // not a known local table; skip
+        }
+        let col_csv = cols
+            .iter()
+            .map(|c| format!("\"{}\"", c.1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            "INSERT OR REPLACE INTO \"{tbl}\" ({cols}) SELECT {cols} FROM peerdb.\"{tbl}\"",
+            tbl = name,
+            cols = col_csv
+        );
+        if let Ok(r) = sqlx::query(&sql).execute(pool).await {
+            processed += 1;
+            total_rows += r.rows_affected() as usize;
+        }
+    }
+
+    sqlx::query("DETACH DATABASE peerdb")
+        .execute(pool)
+        .await
+        .ok();
+
+    Ok(format!(
+        "Merged {} tables ({} rows) from the peer database.",
+        processed, total_rows
+    ))
+}
+
+fn local_ip() -> Option<String> {
+    let s = UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("8.8.8.8:80").ok()?;
+    s.local_addr().ok().map(|a| a.ip().to_string())
+}
+
+/// Best-effort LAN discovery. Broadcasts a discovery beacon and listens for
+/// `timeout_ms`, collecting the IPs of other TPM-RCA instances that answer.
+/// Returns an empty list (not an error) if the firewall blocks UDP or no peers
+/// are present, so file-based merge remains the fallback.
+pub fn discover_peers(timeout_ms: i64) -> Result<Vec<String>, String> {
+    let socket = UdpSocket::bind(("0.0.0.0", PEER_PORT)).map_err(|e| {
+        format!(
+            "Cannot bind discovery socket ({}). Another instance may be running or the firewall is blocking UDP.",
+            e
+        )
+    })?;
+    socket.set_read_timeout(Some(Duration::from_millis(250))).ok();
+    let _ = socket.set_broadcast(true);
+
+    let self_ip = local_ip();
+    let start = Instant::now();
+    let timeout = Duration::from_millis(timeout_ms.max(500) as u64);
+    let mut peers: HashSet<String> = HashSet::new();
+
+    let _ = socket.send_to(DISCOVER_MSG, ("255.255.255.255", PEER_PORT));
+
+    let mut buf = [0u8; 1024];
+    while start.elapsed() < timeout {
+        match socket.recv_from(&mut buf) {
+            Ok((n, src)) => {
+                let msg = String::from_utf8_lossy(&buf[..n]);
+                if msg.contains("DISCOVER") {
+                    let _ = socket.send_to(HERE_MSG, src);
+                } else if msg.contains("HERE") {
+                    let ip = src.ip().to_string();
+                    if self_ip.as_deref() != Some(ip.as_str()) {
+                        peers.insert(ip);
+                    }
+                }
+            }
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                continue;
+            }
+            Err(_) => break,
+        }
+    }
+    let mut list: Vec<String> = peers.into_iter().collect();
+    list.sort();
+    Ok(list)
 }

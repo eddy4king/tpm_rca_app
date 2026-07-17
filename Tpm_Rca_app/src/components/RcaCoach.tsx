@@ -94,14 +94,14 @@ export default function RcaCoach({
         });
       }
       for (const a of report.rca_seed.actions) {
-        await invoke("add_rca_node", {
+        await invoke("create_capa", {
           payload: {
             investigationId,
-            parentId: problem.id,
-            nodeType: "Action",
-            gateType: "OR",
             title: a,
+            owner: "RCA Coach",
             description: null,
+            priority: "Medium",
+            dueDate: null,
           },
         });
       }

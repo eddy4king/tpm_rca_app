@@ -142,12 +142,17 @@ interface IconButtonVariantProps
 export function Card({
   className = "",
   children,
+  onClick,
 }: {
   className?: string;
   children: ReactNode;
+  onClick?: () => void;
 }) {
   return (
-    <div className={`bg-white rounded-2xl border border-slate-200 p-5 shadow-sm ${className}`}>
+    <div
+      onClick={onClick}
+      className={`bg-white rounded-2xl border border-slate-200 p-5 shadow-sm ${onClick ? "cursor-pointer " : ""}${className}`}
+    >
       {children}
     </div>
   );

@@ -3,11 +3,20 @@ import {
   useEffect,
   useMemo,
   useCallback,
+  useRef,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Download } from "lucide-react";
+import { Download, Mic, Radio } from "lucide-react";
 import { exportToCsv } from "../lib/export";
 import { useToast } from "../context/ToastContext";
+import { createDictation } from "../lib/voice";
+import {
+  loadDrafts,
+  saveDraft,
+  deleteDraft,
+  type DowntimeDraft,
+} from "../lib/drafts";
+import TagScanner from "../components/TagScanner";
 import {
   Button,
   Card,
@@ -102,6 +111,70 @@ function DowntimePage() {
 
   const [form, setForm] = useState(defaultForm);
   const [closeForm, setCloseForm] = useState(defaultCloseForm);
+
+  // Shop-floor capture: offline drafts + voice dictation + tag scanner.
+  const [drafts, setDrafts] = useState<DowntimeDraft[]>(() => loadDrafts());
+  const [showDrafts, setShowDrafts] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [listeningField, setListeningField] = useState<null | "title" | "description">(null);
+  const dictationRef = useRef<{ start: () => void; stop: () => void } | null>(null);
+
+  useEffect(() => {
+    return () => {
+      dictationRef.current?.stop();
+    };
+  }, []);
+
+  function startDictate(field: "title" | "description") {
+    dictationRef.current?.stop();
+    dictationRef.current = createDictation(
+      (text) => {
+        setForm((prev) => ({
+          ...prev,
+          [field]: (prev[field] ? prev[field] + " " : "") + text,
+        }));
+      },
+      (listening) => setListeningField(listening ? field : null),
+      (msg) => toast.error(msg)
+    );
+    dictationRef.current.start();
+  }
+
+  function handleSaveDraft() {
+    if (!form.equipment_id && !form.title && !form.description) {
+      toast.error("Nothing to save — fill in at least one field.");
+      return;
+    }
+    saveDraft({
+      equipment_id: form.equipment_id,
+      title: form.title,
+      description: form.description,
+      loss_category: form.loss_category,
+      start_time: form.start_time,
+      reported_by: form.reported_by,
+    });
+    setDrafts(loadDrafts());
+    toast.success("Draft saved on this device (offline)");
+  }
+
+  function resumeDraft(d: DowntimeDraft) {
+    setForm({
+      equipment_id: d.equipment_id,
+      title: d.title,
+      description: d.description,
+      loss_category: d.loss_category,
+      start_time: d.start_time,
+      reported_by: d.reported_by,
+    });
+    setUi((prev) => ({ ...prev, showForm: true }));
+    setShowDrafts(false);
+    toast.success("Draft loaded");
+  }
+
+  function removeDraft(id: string) {
+    deleteDraft(id);
+    setDrafts(loadDrafts());
+  }
 
   const equipmentMap = useMemo(() => {
     return new Map(equipment.map((eq) => [eq.id, eq]));
@@ -381,6 +454,18 @@ function DowntimePage() {
               <Download className="w-4 h-4" /> Export CSV
             </Button>
             <Button
+              variant="secondary"
+              onClick={() => setScannerOpen(true)}
+            >
+              <Radio className="w-4 h-4" /> Scan Tag
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => setShowDrafts((v) => !v)}
+            >
+              Drafts{drafts.length ? ` (${drafts.length})` : ""}
+            </Button>
+            <Button
               onClick={() => {
                 resetForm();
                 setUi((prev) => ({ ...prev, showForm: !prev.showForm }));
@@ -417,6 +502,49 @@ function DowntimePage() {
         </Select>
       </Card>
 
+      {showDrafts && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-slate-800">Offline Drafts</h3>
+            <span className="text-xs text-slate-400">
+              Saved on this device — available without a connection
+            </span>
+          </div>
+          {drafts.length === 0 ? (
+            <p className="text-sm text-slate-400">
+              No drafts yet. Start a downtime entry and tap “Save draft”.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {drafts.map((d) => (
+                <div
+                  key={d.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">
+                      {d.title || "(untitled)"}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {getEquipmentName(d.equipment_id)} ·{" "}
+                      {new Date(d.savedAt).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <Button size="sm" variant="edit" onClick={() => resumeDraft(d)}>
+                      Resume
+                    </Button>
+                    <Button size="sm" variant="danger" onClick={() => removeDraft(d.id)}>
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
       {ui.showForm && (
         <Card className="p-6">
           <div className="flex justify-between items-center mb-6">
@@ -447,11 +575,25 @@ function DowntimePage() {
               </Select>
             </Field>
 
-            <Input
-              placeholder="Title"
-              value={form.title}
-              onChange={(e) => setForm({ ...form, title: e.target.value })}
-            />
+            <div className="relative">
+              <Input
+                placeholder="Title"
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+              />
+              <button
+                type="button"
+                onClick={() => startDictate("title")}
+                title="Dictate title"
+                className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full ${
+                  listeningField === "title"
+                    ? "bg-rose-500 text-white animate-pulse"
+                    : "text-slate-400 hover:text-slate-700"
+                }`}
+              >
+                <Mic className="w-4 h-4" />
+              </button>
+            </div>
 
             <Select
               value={form.loss_category}
@@ -475,12 +617,26 @@ function DowntimePage() {
               onChange={(e) => setForm({ ...form, reported_by: e.target.value })}
             />
 
-            <Textarea
-              className="col-span-2"
-              placeholder="Description"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-            />
+            <div className="relative col-span-2">
+              <Textarea
+                className="pr-10"
+                placeholder="Description"
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+              />
+              <button
+                type="button"
+                onClick={() => startDictate("description")}
+                title="Dictate description"
+                className={`absolute right-2 top-2 p-1.5 rounded-full ${
+                  listeningField === "description"
+                    ? "bg-rose-500 text-white animate-pulse"
+                    : "text-slate-400 hover:text-slate-700"
+                }`}
+              >
+                <Mic className="w-4 h-4" />
+              </button>
+            </div>
 
             {editingDowntimeObj && !editingDowntimeObj.end_time && (
               <div className="col-span-2 border-t border-slate-200 pt-4 mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-4">
@@ -509,13 +665,20 @@ function DowntimePage() {
               </div>
             )}
 
-            <Button
-              variant="primary"
-              className="col-span-2 w-full"
-              onClick={ui.editingId ? handleUpdate : handleCreate}
-            >
-              {ui.editingId ? "Update Downtime" : "Save Downtime Event"}
-            </Button>
+            <div className="col-span-2 flex gap-3">
+              <Button
+                variant="primary"
+                className="flex-1"
+                onClick={ui.editingId ? handleUpdate : handleCreate}
+              >
+                {ui.editingId ? "Update Downtime" : "Save Downtime Event"}
+              </Button>
+              {!ui.editingId && (
+                <Button variant="secondary" onClick={handleSaveDraft}>
+                  Save draft
+                </Button>
+              )}
+            </div>
           </div>
         </Card>
       )}
@@ -591,6 +754,16 @@ function DowntimePage() {
           </table>
         </TableCard>
       )}
+
+      <TagScanner
+        open={scannerOpen}
+        equipment={equipment}
+        onClose={() => setScannerOpen(false)}
+        onSelect={(id) => {
+          setForm((prev) => ({ ...prev, equipment_id: id }));
+          toast.success("Equipment set from tag");
+        }}
+      />
     </div>
   );
 }

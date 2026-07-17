@@ -133,7 +133,7 @@ export default function AuditPage() {
                         <Chip className="bg-slate-100 text-slate-600 capitalize">{l.entity_type}</Chip>
                         {l.entity_id && <p className="text-xs text-slate-400 mt-1 font-mono truncate max-w-[140px]">{l.entity_id}</p>}
                       </td>
-                      <td className={tdClass} text-sm text-slate-700>{l.description || "—"}</td>
+                      <td className={`${tdClass} text-sm text-slate-700`}>{l.description || "—"}</td>
                       <td className={tdClass}>
                         <span className="inline-flex items-center gap-1.5 text-sm text-slate-600">
                           <User className="w-3.5 h-3.5 text-slate-400" />

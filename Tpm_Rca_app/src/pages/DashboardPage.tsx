@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import MTTRChart from "../components/MTTRChart";
 import { OEEWidget } from "../components/OEEWidget";
+import ReliabilityPanel from "../components/ReliabilityPanel";
 import { invoke } from "@tauri-apps/api/core";
+import { useToast } from "../context/ToastContext";
 import {
   Activity,
   CheckCircle2,
@@ -16,14 +18,20 @@ import {
   ListTodo,
   GitCommitVertical,
   History,
+  Gauge,
+  DollarSign,
+  Download,
 } from "lucide-react";
 import { EQUIPMENT_STATUS } from "../components/indicators";
+import { computeFleetFinance, formatCurrency, FinanceEquipment, FinanceDowntime } from "../lib/finance";
 import {
   PageHeader,
   Card,
+  Button,
   LoadingState,
   Banner,
 } from "../components/ui";
+import { exportToCsv } from "../lib/export";
 
 interface NavigateFn { (p: string): void; }
 
@@ -33,6 +41,8 @@ interface Equipment {
   name: string | null;
   status: string | null;
   criticality: string | null;
+  cost_per_hour: number | null;
+  asset_value: number | null;
 }
 
 interface Downtime {
@@ -69,7 +79,7 @@ interface CAPA {
 const statusDot: Record<string, string> = {
   Running: "bg-emerald-500",
   Failed: "bg-red-500",
-  Maintenance: "bg-amber-500",
+  "Under Maintenance": "bg-amber-500",
   Standby: "bg-blue-500",
 };
 
@@ -121,6 +131,7 @@ function BarChart({ data, label }: { data: { name: string; value: number; color:
 }
 
 function DashboardPage({ onNavigate }: { onNavigate: NavigateFn }) { // Dashboard renders role‑specific widgets
+  const toast = useToast();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [downtime, setDowntime] = useState<Downtime[]>([]);
   const [investigations, setInvestigations] = useState<Investigation[]>([]);
@@ -199,7 +210,7 @@ function DashboardPage({ onNavigate }: { onNavigate: NavigateFn }) { // Dashboar
     // Availability — (planned time - downtime) / planned time * 100
     // Using 30 days * 24 hours * 60 min as planned time
     const plannedMinutes = 30 * 24 * 60;
-    const availability = Math.min(100, Math.round(((plannedMinutes - totalDowntimeMin) / plannedMinutes) * 100));
+    const availability = Math.max(0, Math.min(100, Math.round(((plannedMinutes - totalDowntimeMin) / plannedMinutes) * 100)));
 
     // Loss category breakdown
     const categories = ["Breakdown", "Setup", "Minor Stoppage", "Speed Loss"];
@@ -210,6 +221,32 @@ function DashboardPage({ onNavigate }: { onNavigate: NavigateFn }) { // Dashboar
     }));
 
     return { mttr, mtbf, availability, totalDowntimeMin, ongoing: ongoing.length, closed: closed.length, categoryData };
+  }, [filteredDowntime]);
+
+  // Real MTTR trend: average repair time of closed events per day over the last 7 days.
+  const mttrTrend = useMemo(() => {
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - (6 - i));
+      return d;
+    });
+    return days.map((day) => {
+      const next = new Date(day);
+      next.setDate(day.getDate() + 1);
+      const dayEvents = filteredDowntime.filter((e) => {
+        if (!e.end_time || !e.duration_minutes) return false;
+        const t = new Date(e.start_time || e.end_time).getTime();
+        return t >= day.getTime() && t < next.getTime();
+      });
+      const avg = dayEvents.length
+        ? Math.round(dayEvents.reduce((a, e) => a + (e.duration_minutes || 0), 0) / dayEvents.length)
+        : 0;
+      return {
+        date: day.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+        mttr: avg,
+      };
+    });
   }, [filteredDowntime]);
 
   const capaMetrics = useMemo(() => {
@@ -238,6 +275,23 @@ function DashboardPage({ onNavigate }: { onNavigate: NavigateFn }) { // Dashboar
       return { ...eq, openDowntime, totalEvents };
     }).sort((a, b) => b.openDowntime - a.openDowntime);
   }, [equipment, downtime]);
+
+  // Financial Visibility (Roadmap #3) — lost-production cost from downtime ×
+  // per-asset hourly rate, plus asset value at risk.
+  const finance = useMemo(() => {
+    const finEq: FinanceEquipment[] = equipment.map(e => ({
+      id: e.id,
+      tag_number: e.tag_number,
+      name: e.name,
+      cost_per_hour: e.cost_per_hour,
+      asset_value: e.asset_value,
+    }));
+    const finDt: FinanceDowntime[] = downtime.map(d => ({
+      equipment_id: d.equipment_id,
+      duration_minutes: d.duration_minutes,
+    }));
+    return computeFleetFinance(finDt, finEq);
+  }, [downtime, equipment]);
 
   if (loading) return <LoadingState label="Loading Dashboard..." />;
   if (error) return <Banner tone="error">{error}</Banner>;
@@ -359,7 +413,7 @@ function DashboardPage({ onNavigate }: { onNavigate: NavigateFn }) { // Dashboar
               <Wrench className="w-5 h-5 text-slate-500" />
               <h3 className="font-bold text-slate-800">MTTR Trend (last 7 days)</h3>
             </div>
-            <MTTRChart data={Array.from({ length: 7 }, (_, i) => ({ date: `Day ${i + 1}`, mttr: metrics.mttr }))} />
+            <MTTRChart data={mttrTrend} />
           </Card>
 
           <Card>
@@ -368,6 +422,109 @@ function DashboardPage({ onNavigate }: { onNavigate: NavigateFn }) { // Dashboar
               <h3 className="font-bold text-slate-800">CAPA by Priority</h3>
             </div>
             <BarChart data={capaMetrics.priorityData} label="Actions per priority level" />
+          </Card>
+        </div>
+
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Gauge className="w-5 h-5 text-indigo-500" />
+            <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Reliability Engineering</h2>
+          </div>
+          <ReliabilityPanel />
+        </div>
+
+        {/* FINANCIAL VISIBILITY */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <div className="flex items-center gap-2">
+              <DollarSign className="w-5 h-5 text-emerald-500" />
+              <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">Financial Visibility</h2>
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                exportToCsv("financial_report", finance.assets, [
+                  { key: "tag_number", label: "Tag Number" },
+                  { key: "name", label: "Name" },
+                  { key: "downtime_minutes", label: "Downtime (min)" },
+                  { key: "downtime_cost", label: "Downtime Cost", format: (v) => formatCurrency(v as number) },
+                  { key: "cost_per_hour", label: "Cost/Hour", format: (v) => (v as number | null) ?? "" },
+                  { key: "asset_value", label: "Asset Value", format: (v) => (v as number | null) ?? "" },
+                ]);
+                toast.success("Financial report exported");
+              }}
+            >
+              <Download className="w-4 h-4" /> Export Report
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <KpiCard
+              label="Downtime Cost"
+              value={formatCurrency(finance.total_downtime_cost)}
+              icon={<DollarSign className="w-5 h-5 text-rose-600" />}
+              color="bg-rose-50"
+              accent="border-rose-500"
+              sub="Lost production (logged)"
+            />
+            <KpiCard
+              label="Asset Value"
+              value={formatCurrency(finance.total_asset_value)}
+              icon={<DollarSign className="w-5 h-5 text-emerald-600" />}
+              color="bg-emerald-50"
+              accent="border-emerald-500"
+              sub="Tracked replacement value"
+            />
+            <KpiCard
+              label="Hourly Cost Exposure"
+              value={formatCurrency(finance.total_hourly_cost)}
+              icon={<DollarSign className="w-5 h-5 text-amber-600" />}
+              color="bg-amber-50"
+              accent="border-amber-500"
+              sub="If all assets down at once"
+            />
+            <KpiCard
+              label="Cost vs Asset Value"
+              value={`${finance.downtime_cost_ratio.toFixed(1)}%`}
+              icon={<TrendingDown className="w-5 h-5 text-orange-600" />}
+              color="bg-orange-50"
+              accent="border-orange-500"
+              sub="Lost production ÷ asset value"
+            />
+          </div>
+
+          <Card>
+            <div className="flex items-center gap-2 mb-4">
+              <BarChart3 className="w-5 h-5 text-slate-500" />
+              <h3 className="font-bold text-slate-800">Top Cost Assets (downtime $)</h3>
+            </div>
+            {finance.top_cost_assets.length === 0 ? (
+              <p className="text-sm text-slate-400 py-4">
+                No valued downtime yet — set a Cost / Hour on equipment to quantify losses.
+              </p>
+            ) : (
+              <div className="space-y-2.5">
+                {finance.top_cost_assets.map((a) => {
+                  const max = Math.max(...finance.top_cost_assets.map((x) => x.downtime_cost), 1);
+                  return (
+                    <div key={a.equipment_id}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="text-slate-700 dark:text-slate-200">
+                          {a.tag_number || a.name || a.equipment_id}
+                        </span>
+                        <span className="font-semibold text-rose-600">{formatCurrency(a.downtime_cost)}</span>
+                      </div>
+                      <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-rose-500"
+                          style={{ width: `${(a.downtime_cost / max) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
         </div>
 

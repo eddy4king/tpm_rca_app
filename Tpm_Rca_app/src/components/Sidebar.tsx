@@ -1,8 +1,9 @@
-import { LucideIcon, LayoutDashboard, Cog, Network, Activity, Workflow, ClipboardCheck, CalendarClock, ListTodo, GitCommitVertical, History, Users, RefreshCw, Circle, LogOut, HelpCircle } from "lucide-react";
+import { LucideIcon, LayoutDashboard, Cog, Network, Activity, Workflow, ClipboardCheck, CalendarClock, ListTodo, GitCommitVertical, History, Users, RefreshCw, Circle, LogOut, HelpCircle, ShieldAlert, Gauge, BookOpen, DollarSign } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage, LANGUAGES, Lang } from "../context/LanguageContext";
 import { useTour } from "../context/TourContext";
 import ThemeToggle from "./ThemeToggle";
+import { NotificationBell } from "./NotificationBell";
 
 const ICONS: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard,
@@ -15,6 +16,10 @@ const ICONS: Record<string, LucideIcon> = {
   tasks: ListTodo,
   timeline: GitCommitVertical,
   audit: History,
+  fmea: ShieldAlert,
+  cbm: Gauge,
+  knowledge: BookOpen,
+  financials: DollarSign,
   users: Users,
   sync: RefreshCw,
 };
@@ -52,6 +57,9 @@ export default function Sidebar({
         <div className="leading-tight">
           <p className="text-white font-semibold">TPM-RCA</p>
           <p className="text-[11px] text-slate-400">{t("brand.subtitle")}</p>
+        </div>
+        <div className="ml-auto">
+          <NotificationBell />
         </div>
       </div>
 
