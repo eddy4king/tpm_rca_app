@@ -57,7 +57,6 @@ use commands::{
     set_recovery_question,
     get_recovery_question,
     verify_recovery_answer,
-    get_oee_metrics,
     create_fmea,
     get_fmea,
     update_fmea,
@@ -71,7 +70,7 @@ use commands::knowledge::{
     create_knowledge_note, get_knowledge_notes, get_knowledge_note, update_knowledge_note,
     delete_knowledge_note, search_knowledge_notes,
 };
-use commands::photos::{add_photo, get_photos, delete_photo};
+use commands::photos::{add_photo, get_photos, delete_photo, update_photo};
 use crate::services::integrations::*;
 use crate::services::ai::rca_coach_report;
 use crate::services::reliability::reliability_report;
@@ -94,9 +93,19 @@ use commands::notifications::{
     get_notifications, get_unread_count, mark_notification_read, mark_all_read,
     get_notification_prefs, update_notification_prefs, generate_alerts,
 };
+use commands::production::{
+    create_production_log, list_production_logs, delete_production_log, get_equipment_oee,
+    get_oee_metrics,
+};
+use commands::kaizen::{
+    list_kaizen, create_kaizen, update_kaizen, delete_kaizen, set_kaizen_status, vote_kaizen,
+    get_oee_leaderboard,
+};
 use commands::reports::{
     create_report_schedule, get_report_schedules, delete_report_schedule, run_report_schedule,
+    run_due_reports_cmd,
 };
+use crate::services::sso::{get_sso_config, begin_sso_login, await_sso_login, get_ldap_config, ldap_login};
 use commands::timeline::get_maintenance_timeline;
 use commands::backup::{backup_database, list_backups, restore_database};
 
@@ -122,17 +131,36 @@ pub fn run() {
     dotenvy::dotenv().ok();
 
     tauri::Builder::default()
-        .setup(|app|  {
+     .setup(|app|  {
             dotenvy::dotenv().ok();
             let handle = app.handle().clone();
             let pool =  tauri::async_runtime::block_on(
                 async {db::init().await});
-                  handle.manage(pool);
+                  handle.manage(pool.clone());
                   handle.manage(crate::session::SessionState::default());
+
+                  // Background scheduler: deliver due reports and regenerate
+                  // system alerts on a fixed interval (Phase 2 — automated
+                  // report delivery + notification engine).
+                  let scheduler_pool = pool.clone();
+                  tauri::async_runtime::spawn(async move {
+                      // Small grace delay so startup settles.
+                      let _ = tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                      loop {
+                          if let Err(e) = crate::commands::reports::run_due_reports(&scheduler_pool).await {
+                              eprintln!("[scheduler] report run error: {}", e);
+                          }
+                          if let Err(e) = crate::services::notifications::generate_system_alerts(&scheduler_pool).await {
+                              eprintln!("[scheduler] alert generation error: {}", e);
+                          }
+                          let _ = tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+                      }
+                  });
+
                   Ok(())
-        })
+              })
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![
+.invoke_handler(tauri::generate_handler![
             greet, 
             create_equipment,
             get_all_equipment,
@@ -195,6 +223,10 @@ pub fn run() {
             verify_recovery_answer,
             get_role_permissions,
             get_oee_metrics,
+            get_equipment_oee,
+            create_production_log,
+            list_production_logs,
+            delete_production_log,
             reliability_report,
             create_fmea,
             get_fmea,
@@ -245,6 +277,19 @@ pub fn run() {
             get_report_schedules,
             delete_report_schedule,
             run_report_schedule,
+            run_due_reports_cmd,
+            list_kaizen,
+            create_kaizen,
+            update_kaizen,
+            delete_kaizen,
+            set_kaizen_status,
+            vote_kaizen,
+            get_oee_leaderboard,
+            get_sso_config,
+            begin_sso_login,
+            await_sso_login,
+            get_ldap_config,
+            ldap_login,
             get_maintenance_timeline,
             backup_database,
             list_backups,
@@ -261,7 +306,8 @@ pub fn run() {
             search_knowledge_notes,
             add_photo,
             get_photos,
-            delete_photo])
+            delete_photo,
+            update_photo])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

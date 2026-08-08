@@ -19,6 +19,37 @@ interface PhotoCaptureProps {
 }
 
 const MAX_DIM = 1024;
+const MAX_BYTES = 15 * 1024 * 1024;
+
+/** Downscales a decoded image (data URL) to at most MAX_DIM px, re-encoded as JPEG. */
+function downscaleDataUrl(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, MAX_DIM / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d")?.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", 0.7));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+/** Reads a file and returns a downscaled data URL (matches camera capture sizing). */
+async function fileToDownscaledDataUrl(file: File): Promise<string> {
+  const raw = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  return downscaleDataUrl(raw);
+}
 
 export default function PhotoCapture({ recordType, recordId }: PhotoCaptureProps) {
   const toast = useToast();
@@ -103,13 +134,25 @@ export default function PhotoCapture({ recordType, recordId }: PhotoCaptureProps
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    const data = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
+    if (file.size > MAX_BYTES) {
+      toast.error("Image is large; it will be downscaled before saving.");
+    }
+    const data = await fileToDownscaledDataUrl(file);
     await addPhoto(data);
+  }
+
+  async function updateCaption(id: string, caption: string) {
+    try {
+      const updated = await invoke<Photo>("update_photo", {
+        id,
+        caption: caption.trim() || null,
+      });
+      setPhotos((p) => p.map((x) => (x.id === id ? updated : x)));
+      setViewing(updated);
+      toast.success("Caption updated");
+    } catch (err) {
+      toast.error(String(err));
+    }
   }
 
   async function addPhoto(data: string) {
@@ -233,9 +276,19 @@ export default function PhotoCapture({ recordType, recordId }: PhotoCaptureProps
         <Modal title="Photo" onClose={() => setViewing(null)} maxWidth="max-w-2xl">
           <div className="space-y-3">
             <img src={viewing.data} alt={viewing.caption || "photo"} className="w-full rounded-lg" />
-            {viewing.caption && (
-              <p className="text-sm text-slate-600">{viewing.caption}</p>
-            )}
+            <div className="flex gap-2">
+              <Input
+                placeholder="Caption (optional)"
+                defaultValue={viewing.caption || ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setViewing((prev) => (prev ? { ...prev, caption: v } : prev));
+                }}
+              />
+              <Button variant="secondary" onClick={() => updateCaption(viewing.id, viewing.caption || "")}>
+                Save
+              </Button>
+            </div>
             <div className="flex justify-end">
               <Button variant="danger" onClick={() => removePhoto(viewing.id)}>
                 <Trash2 className="w-4 h-4" /> Delete

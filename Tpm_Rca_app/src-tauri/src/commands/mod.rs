@@ -2,34 +2,53 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 use tauri::State;
 use uuid::Uuid;
-use crate::models::{Equipment, Downtime, RcaInvestigation, RcaNode, CAPA, PmSchedule, FmeaRow};
+use crate::models::{Equipment, Downtime, RcaInvestigation, RcaNode, CAPA, PmSchedule};
 
 
-use crate::sync::{
-    sync_to_postgres,
-    sync_from_postgres,
-    get_sync_config,
-    export_peer_snapshot as peer_export_snapshot,
-    merge_peer_database as peer_merge_database,
-    discover_peers as peer_discover_peers,
-};
+use crate::sync::{sync_to_postgres, sync_from_postgres, get_sync_config};
 use bcrypt::{hash, verify, DEFAULT_COST};
 use crate::models::SafeUser;
 use crate::models::User;
 use crate::models::Session;
 use crate::commands::audit::record_audit;
-use crate::session::{SessionState, enforce, enforce_self_or_admin};
+use crate::session::{SessionState, enforce};
+use crate::models::FmeaRow;
 pub mod role;
 pub mod audit;
-pub mod inventory;
-pub mod workorders;
-pub mod notifications;
-pub mod reports;
 pub mod hierarchy;
 pub mod timeline;
-pub mod backup;
 pub mod knowledge;
 pub mod photos;
+pub mod reports;
+pub mod production;
+pub mod kaizen;
+pub mod backup;
+pub mod inventory;
+pub mod notifications;
+pub mod workorders;
+pub mod import;
+pub use import::import_equipment_csv;
+
+#[tauri::command]
+pub async fn export_peer_snapshot(
+    pool: State<'_, SqlitePool>,
+    path: String,
+) -> Result<String, String> {
+    crate::sync::export_peer_snapshot(&pool, path).await
+}
+
+#[tauri::command]
+pub async fn merge_peer_database(
+    pool: State<'_, SqlitePool>,
+    peer_path: String,
+) -> Result<String, String> {
+    crate::sync::merge_peer_database(&pool, peer_path).await
+}
+
+#[tauri::command]
+pub fn discover_peers(timeout_ms: i64) -> Result<Vec<String>, String> {
+    crate::sync::discover_peers(timeout_ms)
+}
 
 
 #[derive(Deserialize)]
@@ -43,9 +62,7 @@ pub struct CreateEquipmentPayload {
     pub status : String,
     pub equipment_type : String,
     pub parent_id : Option<String>,
-    pub area_id : Option<String>,
-    pub cost_per_hour : Option<f64>,
-    pub asset_value : Option<f64>,
+    pub area_id : Option<String>
 }
 
 
@@ -53,15 +70,13 @@ pub struct CreateEquipmentPayload {
 #[tauri::command]
 pub async fn create_equipment(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: CreateEquipmentPayload,
 ) -> Result<Equipment, String> {
-    enforce(&session, "Engineer")?;
     let id = Uuid::new_v4().to_string();
 
    sqlx::query(
-        "INSERT INTO equipment (id, tag_number, name, description, location, criticality, status, equipment_type, parent_id, area_id, cost_per_hour, asset_value)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
+        "INSERT INTO equipment (id, tag_number, name, description, location, criticality, status, equipment_type, parent_id, area_id)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
     )
     .bind(&id)
     .bind(&payload.tag_number)
@@ -73,8 +88,6 @@ pub async fn create_equipment(
     .bind(&payload.equipment_type)
     .bind(&payload.parent_id)
     .bind(&payload.area_id)
-    .bind(payload.cost_per_hour)
-    .bind(payload.asset_value)
     .execute(&*pool)
     .await
     .map_err(|e: sqlx::Error| e.to_string())?;
@@ -110,35 +123,6 @@ pub async fn get_all_equipment(
 }
 
 #[tauri::command]
-pub async fn get_oee_metrics(pool: State<'_, SqlitePool>) -> Result<serde_json::Value, String> {
-    // Planned production minutes for the last 30 days (30 days × 24 h × 60 min)
-    let planned_minutes: i64 = 30 * 24 * 60;
-
-    // Total downtime minutes from the downtime table
-    let total_downtime: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(duration_minutes), 0) FROM downtime"
-    )
-    .fetch_one(&*pool)
-    .await
-    .map_err(|e: sqlx::Error| e.to_string())?;
-
-    // Availability = (planned – downtime) / planned * 100
-    let availability = ((planned_minutes - total_downtime).max(0) as f64 / planned_minutes as f64) * 100.0;
-
-    // For MVP we set performance and quality to 100 % – can be refined later.
-    let performance: f64 = 100.0;
-    let quality: f64 = 100.0;
-
-    let result = serde_json::json!({
-        "availability": availability.round() as i64,
-        "performance": performance.round() as i64,
-        "quality": quality.round() as i64,
-    });
-    Ok(result)
-}
-
-
-#[tauri::command]
 pub async fn get_equipment(
     pool: State<'_, SqlitePool>,
     id:String,
@@ -165,19 +149,15 @@ pub struct UpdateEquipmentPayload {
     pub criticality : Option<String>,
     pub status : Option<String>,
     pub equipment_type : Option<String>,
-    pub area_id : Option<String>,
-    pub cost_per_hour : Option<f64>,
-    pub asset_value : Option<f64>,
+    pub area_id : Option<String>
 }
 
 
 #[tauri::command]
 pub async fn update_equipment (
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: UpdateEquipmentPayload,
 ) -> Result<Equipment, String> {
-    enforce(&session, "Engineer")?;
     sqlx::query(
         "UPDATE equipment SET
             tag_number = COALESCE(?1, tag_number),
@@ -188,10 +168,8 @@ pub async fn update_equipment (
             status = COALESCE(?6, status),
             equipment_type = COALESCE(?7, equipment_type),
             area_id = COALESCE(?8, area_id),
-            cost_per_hour = COALESCE(?9, cost_per_hour),
-            asset_value = COALESCE(?10, asset_value),
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?11"
+        WHERE id = ?9"
     )
     .bind(&payload.tag_number)
     .bind(&payload.name)
@@ -201,8 +179,6 @@ pub async fn update_equipment (
     .bind(&payload.status)
     .bind(&payload.equipment_type)
     .bind(&payload.area_id)
-    .bind(payload.cost_per_hour)
-    .bind(payload.asset_value)
     .bind(&payload.id)
     .execute(&*pool)
     .await
@@ -226,10 +202,8 @@ pub async fn update_equipment (
 #[tauri::command]
 pub async fn delete_equipment(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     id: String,
 ) -> Result<(), String> {
-    enforce(&session, "Engineer")?;
      sqlx::query(
         "DELETE FROM equipment WHERE id = ?1"
         ).bind(&id)
@@ -240,58 +214,6 @@ pub async fn delete_equipment(
     record_audit(&pool, "equipment", Some(&id), "delete",
         "Equipment deleted", None).await.ok();
     Ok(())
-}
-
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImportEquipmentRow {
-    pub tag_number: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub location: Option<String>,
-    pub criticality: Option<String>,
-    pub status: Option<String>,
-    pub equipment_type: Option<String>,
-    pub parent_id: Option<String>,
-    pub area_id: Option<String>,
-    pub cost_per_hour: Option<f64>,
-    pub asset_value: Option<f64>,
-}
-
-
-#[tauri::command]
-pub async fn import_equipment_csv(
-    pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
-    rows: Vec<ImportEquipmentRow>,
-) -> Result<usize, String> {
-    enforce(&session, "Engineer")?;
-    let mut count: usize = 0;
-    for row in rows {
-        let id = Uuid::new_v4().to_string();
-        sqlx::query(
-            "INSERT INTO equipment (id, tag_number, name, description, location, criticality, status, equipment_type, parent_id, area_id, cost_per_hour, asset_value)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)"
-        )
-        .bind(&id)
-        .bind(&row.tag_number)
-        .bind(&row.name)
-        .bind(&row.description)
-        .bind(&row.location)
-        .bind(&row.criticality)
-        .bind(&row.status)
-        .bind(&row.equipment_type)
-        .bind(&row.parent_id)
-        .bind(&row.area_id)
-        .bind(row.cost_per_hour)
-        .bind(row.asset_value)
-        .execute(&*pool)
-        .await
-        .map_err(|e: sqlx::Error| e.to_string())?;
-        count += 1;
-    }
-    Ok(count)
 }
 
 
@@ -309,10 +231,8 @@ pub struct CreateDowntimePayload{
 #[tauri::command]
 pub async fn create_downtime(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: CreateDowntimePayload,
 ) -> Result<Downtime, String> {
-    enforce(&session, "Technician")?;
     let id = Uuid::new_v4().to_string();
 
    sqlx::query(
@@ -365,12 +285,10 @@ pub async fn get_equipment_downtime(
 #[tauri::command]
 pub async fn close_downtime(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     id: String,
     end_time: String,
     duration_minutes: i64,
 ) -> Result<Downtime, String> {
-    enforce(&session, "Technician")?;
      sqlx::query(
         "UPDATE downtime SET end_time = ?1, duration_minutes = ?2 WHERE id =?3"
         ).bind(&end_time)
@@ -420,10 +338,8 @@ pub struct AddRcaNodePayload {
 #[tauri::command]
 pub async fn create_investigation(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: CreateInvestigationPayload,
 ) -> Result<RcaInvestigation, String> {
-    enforce(&session, "Engineer")?;
     let id = Uuid::new_v4().to_string();
 
     sqlx::query(
@@ -472,10 +388,8 @@ pub async fn get_investigations(
 #[tauri::command]
 pub async fn add_rca_node(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: AddRcaNodePayload,
 ) -> Result<RcaNode, String> {
-    enforce(&session, "Engineer")?;
     let id = Uuid::new_v4().to_string();
 
     sqlx::query(
@@ -546,10 +460,8 @@ pub struct UpdateInvestigationPayload {
 #[tauri::command]
 pub async fn update_downtime(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: UpdateDowntimePayload,
 ) -> Result<Downtime, String> {
-    enforce(&session, "Technician")?;
     sqlx::query(
         "UPDATE downtime SET
             title = COALESCE(?1, title),
@@ -583,10 +495,8 @@ pub async fn update_downtime(
 #[tauri::command]
 pub async fn delete_downtime(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     id: String,
 ) -> Result<(), String> {
-    enforce(&session, "Technician")?;
     sqlx::query("DELETE FROM downtime WHERE id = ?1")
         .bind(&id)
         .execute(&*pool)
@@ -595,16 +505,14 @@ pub async fn delete_downtime(
 
     record_audit(&pool, "downtime", Some(&id), "delete",
         "Downtime event deleted", None).await.ok();
-    Ok(())
+    Ok(()) 
 }
 
 #[tauri::command]
 pub async fn update_investigation(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: UpdateInvestigationPayload,
 ) -> Result<RcaInvestigation, String> {
-    enforce(&session, "Engineer")?;
     sqlx::query(
         "UPDATE rca_investigations SET
             title = COALESCE(?1, title),
@@ -635,10 +543,8 @@ pub async fn update_investigation(
 #[tauri::command]
 pub async fn delete_investigation(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     id: String,
 ) -> Result<(), String> {
-    enforce(&session, "Engineer")?;
     sqlx::query("DELETE FROM rca_investigations WHERE id = ?1")
         .bind(&id)
         .execute(&*pool)
@@ -650,10 +556,8 @@ pub async fn delete_investigation(
 #[tauri::command]
 pub async fn delete_rca_node(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     id: String,
 ) -> Result<(), String> {
-    enforce(&session, "Engineer")?;
     sqlx::query("DELETE FROM rca_nodes WHERE id = ?1")
         .bind(&id)
         .execute(&*pool)
@@ -665,12 +569,10 @@ pub async fn delete_rca_node(
 #[tauri::command]
 pub async fn update_node_position(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     id: String,
     x_pos: f64,
     y_pos: f64,
 ) -> Result<(), String> {
-    enforce(&session, "Engineer")?;
     sqlx::query(
         "UPDATE rca_nodes SET x_pos = ?1, y_pos = ?2 WHERE id = ?3"
     )
@@ -768,10 +670,8 @@ pub struct UpdateCapaPayload{
 #[tauri::command]
 pub async fn create_capa(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: CreateCapaPayload,
 ) -> Result<CAPA, String> {
-    enforce(&session, "Engineer")?;
     let id = Uuid::new_v4().to_string();
 
     sqlx::query(
@@ -824,10 +724,8 @@ pub async fn get_investigation_capas(
 #[tauri::command]
 pub async fn update_capa(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: UpdateCapaPayload,
 ) -> Result<CAPA, String> {
-    enforce(&session, "Engineer")?;
     sqlx::query(
         "UPDATE capa SET
             investigation_id = COALESCE(?1, investigation_id),
@@ -868,10 +766,8 @@ pub async fn update_capa(
 #[tauri::command]
 pub async fn delete_capa(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     id: String,
 ) -> Result<(), String> {
-    enforce(&session, "Engineer")?;
     sqlx::query("DELETE FROM capa WHERE id = ?1")
         .bind(&id)
         .execute(&*pool)
@@ -930,10 +826,8 @@ pub struct UpdatePmSchedulePayload {
 #[tauri::command]
 pub async fn create_pm_schedule(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: CreatePmSchedulePayload,
 ) -> Result<PmSchedule, String> {
-    enforce(&session, "Technician")?;
     let id = Uuid::new_v4().to_string();
 
     sqlx::query(
@@ -1001,10 +895,8 @@ pub async fn get_all_pm_schedules(
 #[tauri::command]
 pub async fn update_pm_schedule(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: UpdatePmSchedulePayload,
 ) -> Result<PmSchedule, String> {
-    enforce(&session, "Technician")?;
     sqlx::query(
         "UPDATE pm_schedule SET
             title = COALESCE(?1, title),
@@ -1044,16 +936,17 @@ pub async fn update_pm_schedule(
 
     let schedule = result.map_err(|e: sqlx::Error| e.to_string())?;
 
+    record_audit(&pool, "pm_schedule", Some(&payload.id), "complete",
+        "PM task marked complete", None).await.ok();
+
     Ok(schedule)
 }
 
 #[tauri::command]
 pub async fn delete_pm_schedule(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     id: String,
 ) -> Result<(), String> {
-    enforce(&session, "Technician")?;
     sqlx::query("DELETE FROM pm_schedule WHERE id = ?1")
         .bind(&id)
         .execute(&*pool)
@@ -1068,12 +961,10 @@ pub async fn delete_pm_schedule(
 #[tauri::command]
 pub async fn complete_pm_schedule(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     id: String,
     completed_at: String,
     next_due_date: String,
 ) -> Result<PmSchedule, String> {
-    enforce(&session, "Technician")?;
     sqlx::query(
         "UPDATE pm_schedule SET
             status = 'Completed',
@@ -1096,10 +987,6 @@ pub async fn complete_pm_schedule(
     .await;
 
     let schedule = result.map_err(|e: sqlx::Error| e.to_string())?;
-
-    record_audit(&pool, "pm_schedule", Some(&id), "complete",
-        "PM task marked complete", None).await.ok();
-
     Ok(schedule)
 }
 
@@ -1123,10 +1010,8 @@ pub async fn get_sync_config_cmd(
 #[tauri::command]
 pub async fn update_sync_config(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: UpdateSyncConfigPayload,
 ) -> Result<crate::models::SyncConfig, String> {
-    enforce(&session, "Admin")?;
     sqlx::query(
         "UPDATE sync_config SET
             postgres_url = COALESCE(?1, postgres_url),
@@ -1147,18 +1032,14 @@ pub async fn update_sync_config(
 #[tauri::command]
 pub async fn push_to_postgres(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
 ) -> Result<String, String> {
-    enforce(&session, "Admin")?;
     sync_to_postgres(&pool).await
 }
 
 #[tauri::command]
 pub async fn pull_from_postgres(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
 ) -> Result<String, String> {
-    enforce(&session, "Admin")?;
     sync_from_postgres(&pool).await
 }
 
@@ -1193,31 +1074,6 @@ pub async fn get_sync_logs(
     Ok(result)
 }
 
-// ── Peer (LAN) sync commands ──────────────────────────────────────────────
-
-#[tauri::command]
-pub async fn export_peer_snapshot(
-    pool: State<'_, SqlitePool>,
-    path: String,
-) -> Result<String, String> {
-    peer_export_snapshot(&pool, path).await
-}
-
-#[tauri::command]
-pub async fn merge_peer_database(
-    pool: State<'_, SqlitePool>,
-    peer_path: String,
-) -> Result<String, String> {
-    peer_merge_database(&pool, peer_path).await
-}
-
-#[tauri::command]
-pub async fn discover_peers(timeout_ms: i64) -> Result<Vec<String>, String> {
-    // Discovery is a short, time-bounded blocking call (UDP listen for
-    // `timeout_ms`); it runs inline on the command's task.
-    peer_discover_peers(timeout_ms)
-}
-
 
 
 #[derive(Deserialize)]
@@ -1249,10 +1105,8 @@ pub struct UpdateUserPayload {
 #[tauri::command]
 pub async fn register_user(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: RegisterPayload,
 ) -> Result<SafeUser, String> {
-    enforce(&session, "Admin")?;
     let id = Uuid::new_v4().to_string();
     let password_hash = hash(&payload.password, DEFAULT_COST)
         .map_err(|e| e.to_string())?;
@@ -1293,7 +1147,6 @@ pub async fn register_user(
 #[tauri::command]
 pub async fn login_user(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: LoginPayload,
 ) -> Result<(SafeUser, String), String> {
     let user = sqlx::query_as::<_, User>(
@@ -1311,10 +1164,9 @@ pub async fn login_user(
         return Err("Invalid username or password".to_string());
     }
 
-    // Create a signed JWT session token (tamper-evident). It is also recorded
-    // in the sessions table so it can be revoked server-side on logout.
+    // Create session token
     let session_id = Uuid::new_v4().to_string();
-    let token = crate::services::jwt::create_jwt(&user.id, &user.role, 7)?;
+    let token = Uuid::new_v4().to_string();
     let expires_at = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::days(7))
         .unwrap()
@@ -1349,15 +1201,12 @@ pub async fn login_user(
         last_login_at: user.last_login_at,
     };
 
-    session.set(Some(safe_user.id.clone()), Some(safe_user.role.clone()));
-
     Ok((safe_user, token))
 }
 
 #[tauri::command]
 pub async fn logout_user(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     token: String,
 ) -> Result<(), String> {
     sqlx::query("DELETE FROM sessions WHERE token = ?1")
@@ -1365,54 +1214,39 @@ pub async fn logout_user(
         .execute(&*pool)
         .await
         .map_err(|e: sqlx::Error| e.to_string())?;
-    session.clear();
     Ok(())
 }
 
 #[tauri::command]
 pub async fn validate_session(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     token: String,
 ) -> Result<SafeUser, String> {
-    // 1. Verify the JWT signature and expiry (tamper-evidence).
-    crate::services::jwt::verify_jwt(&token)?;
-
-    // 2. Ensure the session still exists server-side (supports revocation).
-    let db_session = sqlx::query_as::<_, Session>(
+    let session = sqlx::query_as::<_, Session>(
         "SELECT * FROM sessions WHERE token = ?1"
     )
     .bind(&token)
     .fetch_one(&*pool)
     .await
-    .map_err(|_| {
-        session.clear();
-        "Invalid or expired session".to_string()
-    })?;
+    .map_err(|_| "Invalid or expired session".to_string())?;
 
     let now = chrono::Utc::now().to_rfc3339();
-    if db_session.expires_at < now {
+    if session.expires_at < now {
         sqlx::query("DELETE FROM sessions WHERE token = ?1")
             .bind(&token)
             .execute(&*pool)
             .await
             .ok();
-        session.clear();
         return Err("Session expired".to_string());
     }
 
     let user = sqlx::query_as::<_, User>(
         "SELECT * FROM users WHERE id = ?1 AND is_active = 1"
     )
-    .bind(&db_session.user_id)
+    .bind(&session.user_id)
     .fetch_one(&*pool)
     .await
-    .map_err(|_| {
-        session.clear();
-        "User not found".to_string()
-    })?;
-
-    session.set(Some(user.id.clone()), Some(user.role.clone()));
+    .map_err(|_| "User not found".to_string())?;
 
     Ok(SafeUser {
         id: user.id,
@@ -1450,10 +1284,8 @@ pub async fn get_all_users(
 #[tauri::command]
 pub async fn update_user(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: UpdateUserPayload,
 ) -> Result<SafeUser, String> {
-    enforce(&session, "Admin")?;
     sqlx::query(
         "UPDATE users SET
             username = COALESCE(?1, username),
@@ -1493,10 +1325,8 @@ pub async fn update_user(
 #[tauri::command]
 pub async fn delete_user(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     id: String,
 ) -> Result<(), String> {
-    enforce(&session, "Admin")?;
     sqlx::query("DELETE FROM users WHERE id = ?1")
         .bind(&id)
         .execute(&*pool)
@@ -1623,10 +1453,8 @@ pub struct ChangePasswordPayload {
 #[tauri::command]
 pub async fn admin_reset_password(
     pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
     payload: AdminResetPasswordPayload,
 ) -> Result<(), String> {
-    enforce(&session, "Admin")?;
     let password_hash = hash(&payload.new_password, DEFAULT_COST)
         .map_err(|e| e.to_string())?;
 
@@ -1646,6 +1474,134 @@ pub async fn admin_reset_password(
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn change_own_password(
+    pool: State<'_, SqlitePool>,
+    payload: ChangePasswordPayload,
+) -> Result<(), String> {
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE id = ?1"
+    )
+    .bind(&payload.user_id)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|_| "User not found".to_string())?;
+
+    let valid = verify(&payload.current_password, &user.password_hash)
+        .map_err(|e| e.to_string())?;
+
+    if !valid {
+        return Err("Current password is incorrect".to_string());
+    }
+
+    let new_hash = hash(&payload.new_password, DEFAULT_COST)
+        .map_err(|e| e.to_string())?;
+
+    sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
+        .bind(&new_hash)
+        .bind(&payload.user_id)
+        .execute(&*pool)
+        .await
+        .map_err(|e: sqlx::Error| e.to_string())?;
+
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRecoveryPayload {
+    pub user_id: String,
+    pub question: String,
+    pub answer: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyRecoveryPayload {
+    pub username: String,
+    pub answer: String,
+    pub new_password: String,
+}
+
+#[tauri::command]
+pub async fn set_recovery_question(
+    pool: State<'_, SqlitePool>,
+    payload: SetRecoveryPayload,
+) -> Result<(), String> {
+    let answer_hash = hash(&payload.answer.to_lowercase().trim(), DEFAULT_COST)
+        .map_err(|e| e.to_string())?;
+
+    sqlx::query(
+        "UPDATE users SET recovery_question = ?1, recovery_answer_hash = ?2 WHERE id = ?3"
+    )
+    .bind(&payload.question)
+    .bind(&answer_hash)
+    .bind(&payload.user_id)
+    .execute(&*pool)
+    .await
+    .map_err(|e: sqlx::Error| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_recovery_question(
+    pool: State<'_, SqlitePool>,
+    username: String,
+) -> Result<Option<String>, String> {
+    let question: Option<String> = sqlx::query_scalar(
+        "SELECT recovery_question FROM users WHERE username = ?1"
+    )
+    .bind(&username)
+    .fetch_optional(&*pool)
+    .await
+    .map_err(|e: sqlx::Error| e.to_string())?
+    .flatten();
+
+    Ok(question)
+}
+
+#[tauri::command]
+pub async fn verify_recovery_answer(
+    pool: State<'_, SqlitePool>,
+    payload: VerifyRecoveryPayload,
+) -> Result<(), String> {
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE username = ?1"
+    )
+    .bind(&payload.username)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|_| "User not found".to_string())?;
+
+    let stored_hash = user.recovery_answer_hash
+        .ok_or("No recovery question set for this account")?;
+
+    let valid = verify(payload.answer.to_lowercase().trim(), &stored_hash)
+        .map_err(|e| e.to_string())?;
+
+    if !valid {
+        return Err("Incorrect answer".to_string());
+    }
+
+    let new_hash = hash(&payload.new_password, DEFAULT_COST)
+        .map_err(|e| e.to_string())?;
+
+    sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
+        .bind(&new_hash)
+        .bind(&user.id)
+        .execute(&*pool)
+        .await
+        .map_err(|e: sqlx::Error| e.to_string())?;
+
+    sqlx::query("DELETE FROM sessions WHERE user_id = ?1")
+        .bind(&user.id)
+        .execute(&*pool)
+        .await
+        .ok();
+
+    Ok(())}
 
 // ── FMEA (Failure Mode & Effects Analysis) ─────────────────────────────
 
@@ -1807,135 +1763,3 @@ pub async fn delete_fmea(
         .map_err(|e: sqlx::Error| e.to_string())?;
     Ok(())
 }
-
-#[tauri::command]
-pub async fn change_own_password(
-    pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
-    payload: ChangePasswordPayload,
-) -> Result<(), String> {
-    enforce_self_or_admin(&session, &payload.user_id)?;
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE id = ?1"
-    )
-    .bind(&payload.user_id)
-    .fetch_one(&*pool)
-    .await
-    .map_err(|_| "User not found".to_string())?;
-
-    let valid = verify(&payload.current_password, &user.password_hash)
-        .map_err(|e| e.to_string())?;
-
-    if !valid {
-        return Err("Current password is incorrect".to_string());
-    }
-
-    let new_hash = hash(&payload.new_password, DEFAULT_COST)
-        .map_err(|e| e.to_string())?;
-
-    sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
-        .bind(&new_hash)
-        .bind(&payload.user_id)
-        .execute(&*pool)
-        .await
-        .map_err(|e: sqlx::Error| e.to_string())?;
-
-    Ok(())
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SetRecoveryPayload {
-    pub user_id: String,
-    pub question: String,
-    pub answer: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VerifyRecoveryPayload {
-    pub username: String,
-    pub answer: String,
-    pub new_password: String,
-}
-
-#[tauri::command]
-pub async fn set_recovery_question(
-    pool: State<'_, SqlitePool>,
-    session: State<'_, SessionState>,
-    payload: SetRecoveryPayload,
-) -> Result<(), String> {
-    enforce_self_or_admin(&session, &payload.user_id)?;
-    let answer_hash = hash(&payload.answer.to_lowercase().trim(), DEFAULT_COST)
-        .map_err(|e| e.to_string())?;
-
-    sqlx::query(
-        "UPDATE users SET recovery_question = ?1, recovery_answer_hash = ?2 WHERE id = ?3"
-    )
-    .bind(&payload.question)
-    .bind(&answer_hash)
-    .bind(&payload.user_id)
-    .execute(&*pool)
-    .await
-    .map_err(|e: sqlx::Error| e.to_string())?;
-
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn get_recovery_question(
-    pool: State<'_, SqlitePool>,
-    username: String,
-) -> Result<Option<String>, String> {
-    let question: Option<String> = sqlx::query_scalar(
-        "SELECT recovery_question FROM users WHERE username = ?1"
-    )
-    .bind(&username)
-    .fetch_optional(&*pool)
-    .await
-    .map_err(|e: sqlx::Error| e.to_string())?
-    .flatten();
-
-    Ok(question)
-}
-
-#[tauri::command]
-pub async fn verify_recovery_answer(
-    pool: State<'_, SqlitePool>,
-    payload: VerifyRecoveryPayload,
-) -> Result<(), String> {
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE username = ?1"
-    )
-    .bind(&payload.username)
-    .fetch_one(&*pool)
-    .await
-    .map_err(|_| "User not found".to_string())?;
-
-    let stored_hash = user.recovery_answer_hash
-        .ok_or("No recovery question set for this account")?;
-
-    let valid = verify(payload.answer.to_lowercase().trim(), &stored_hash)
-        .map_err(|e| e.to_string())?;
-
-    if !valid {
-        return Err("Incorrect answer".to_string());
-    }
-
-    let new_hash = hash(&payload.new_password, DEFAULT_COST)
-        .map_err(|e| e.to_string())?;
-
-    sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
-        .bind(&new_hash)
-        .bind(&user.id)
-        .execute(&*pool)
-        .await
-        .map_err(|e: sqlx::Error| e.to_string())?;
-
-    sqlx::query("DELETE FROM sessions WHERE user_id = ?1")
-        .bind(&user.id)
-        .execute(&*pool)
-        .await
-        .ok();
-
-    Ok(())}

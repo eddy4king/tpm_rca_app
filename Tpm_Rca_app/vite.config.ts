@@ -9,13 +9,13 @@ export default defineConfig({
     tailwindcss(),
   ],
   clearScreen: false,
-  server: {
-    port: 1420,
-    strictPort: true,
-    watch: {
-      ignored: ["**/src-tauri/**"],
+    server: {
+      port: 1421,
+      strictPort: true,
+      watch: {
+        ignored: ["**/src-tauri/**"],
+      },
     },
-  },
   test: {
     globals: true,
     environment: "jsdom",

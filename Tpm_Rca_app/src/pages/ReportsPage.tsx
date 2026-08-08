@@ -78,11 +78,21 @@ export default function ReportsPage() {
       <PageHeader
         title="Scheduled Reports"
         subtitle="Generate and schedule recurring exports (CSV) of key datasets"
-        actions={canManage ? <Button onClick={() => setShowForm(true)}><Plus className="w-4 h-4" /> New Report</Button> : undefined}
+        actions={
+          <div className="flex items-center gap-2">
+            {canManage && (
+              <Button variant="secondary" onClick={async () => {
+                try { const n = await invoke<number>("run_due_reports_cmd"); toast.success(`Ran ${n} due report(s)`); load(); }
+                catch (err) { toast.error(`Failed: ${err}`); }
+              }}><Play className="w-4 h-4" /> Run Due Now</Button>
+            )}
+            {canManage ? <Button onClick={() => setShowForm(true)}><Plus className="w-4 h-4" /> New Report</Button> : undefined}
+          </div>
+        }
       />
 
       <Card className="p-4 text-sm text-slate-500">
-        <p>Run a report to produce a CSV in the local <span className="font-mono">reports/</span> folder and raise an in-app notification. A real scheduler would call these on the chosen frequency; here you trigger them on demand.</p>
+        <p>Run a report to produce a CSV in the local <span className="font-mono">reports/</span> folder and raise an in-app notification. If <span className="font-mono">SMTP_HOST</span> is configured, due reports are emailed to the recipients automatically on a background schedule (daily / weekly / monthly).</p>
       </Card>
 
       {reports.length === 0 ? (

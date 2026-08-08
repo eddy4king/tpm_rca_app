@@ -3,19 +3,23 @@ import { Gauge } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 interface OEEData {
+  has_production_data?: boolean;
   availability: number;
   performance: number;
   quality: number;
+  oee?: number;
 }
 
 export const OEEWidget: React.FC = () => {
   const [oee, setOEE] = useState<OEEData | null>(null);
 
   useEffect(() => {
-    // Call backend stub to get OEE percentages (0‑100)
+    // Call backend to get OEE percentages (0‑100). OEE = Availability ×
+    // Performance × Quality; performance/quality come from captured
+    // production logs, falling back to availability-only until data exists.
     invoke<OEEData>('get_oee_metrics')
       .then(setOEE)
-      .catch(() => setOEE({ availability: 0, performance: 0, quality: 0 }));
+      .catch(() => setOEE({ availability: 0, performance: 0, quality: 0, oee: 0 }));
   }, []);
 
   if (!oee) return (
@@ -24,7 +28,7 @@ export const OEEWidget: React.FC = () => {
     </div>
   );
 
-  const overall = ((oee.availability * oee.performance * oee.quality) / 10000).toFixed(1);
+  const overall = (oee.oee ?? (oee.availability * oee.performance * oee.quality) / 10000).toFixed(1);
 
   const metrics = [
     { label: "Availability", value: oee.availability, color: "text-blue-600" },
@@ -50,6 +54,11 @@ export const OEEWidget: React.FC = () => {
           <p className="text-2xl font-bold mt-1 text-blue-700">{overall}%</p>
         </div>
       </div>
+      {!oee.has_production_data && (
+        <p className="text-xs text-slate-400 mt-3">
+          Availability-only estimate — log production runs (OEE page) for real Performance &amp; Quality.
+        </p>
+      )}
     </div>
   );
 };

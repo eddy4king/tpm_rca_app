@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::models::Photo;
 use crate::session::{SessionState, enforce};
+use crate::commands::audit::record_audit;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,6 +49,9 @@ pub async fn add_photo(
         .await
         .map_err(|e| e.to_string())?;
 
+    record_audit(&pool, "photos", Some(&id), "create",
+        &format!("Photo attached to {} {}", payload.record_type, payload.record_id), None).await.ok();
+
     Ok(photo)
 }
 
@@ -80,5 +84,34 @@ pub async fn delete_photo(
         .execute(&*pool)
         .await
         .map_err(|e| e.to_string())?;
+    record_audit(&pool, "photos", Some(&id), "delete", "Photo removed", None).await.ok();
     Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePhotoPayload {
+    pub id: String,
+    pub caption: Option<String>,
+}
+
+#[tauri::command]
+pub async fn update_photo(
+    pool: State<'_, SqlitePool>,
+    session: State<'_, SessionState>,
+    payload: UpdatePhotoPayload,
+) -> Result<Photo, String> {
+    enforce(&session, "Technician")?;
+    sqlx::query("UPDATE photos SET caption = ?1 WHERE id = ?2")
+        .bind(&payload.caption)
+        .bind(&payload.id)
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    let photo = sqlx::query_as::<_, Photo>("SELECT * FROM photos WHERE id = ?1")
+        .bind(&payload.id)
+        .fetch_one(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(photo)
 }

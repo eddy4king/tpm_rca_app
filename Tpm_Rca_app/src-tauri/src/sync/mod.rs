@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use std::collections::HashSet;
 use crate::models::{
     SyncConfig, SyncLog,
-    Equipment, Downtime, RcaInvestigation, RcaNode, CAPA, PmSchedule,
+    Equipment, Downtime, RcaInvestigation, RcaNode, CAPA, PmSchedule, Photo, ProductionLog,
 };
 
 pub async fn get_sync_config(pool: &SqlitePool) -> Result<SyncConfig, String> {
@@ -161,6 +161,8 @@ async fn snapshot_push(pool: &SqlitePool, pg_pool: &sqlx::PgPool) -> Result<usiz
     push_table!(RcaNode, "rca_nodes");
     push_table!(CAPA, "capa");
     push_table!(PmSchedule, "pm_schedule");
+    push_table!(Photo, "photos");
+    push_table!(ProductionLog, "production_log");
 
     Ok(count)
 }
@@ -177,7 +179,7 @@ pub async fn sync_from_postgres(pool: &SqlitePool) -> Result<String, String> {
 
     let last_synced = config.last_synced_at.unwrap_or_else(|| "1970-01-01".to_string());
 
-    let tables = vec!["equipment", "downtime", "rca_investigations", "rca_nodes", "capa", "pm_schedule"];
+    let tables = vec!["equipment", "downtime", "rca_investigations", "rca_nodes", "capa", "pm_schedule", "photos", "production_log"];
     let mut total_pulled = 0;
 
     for table in tables {
@@ -241,7 +243,18 @@ async fn ensure_pg_tables(pg_pool: &sqlx::PgPool) -> Result<(), String> {
             id TEXT PRIMARY KEY, equipment_id TEXT, title TEXT,
             description TEXT, frequency TEXT, next_due_date TEXT,
             last_completed_at TEXT, assigned_to TEXT, status TEXT,
-            attachments TEXT, created_at TEXT
+            priority TEXT, attachments TEXT, created_at TEXT
+        )",
+        "CREATE TABLE IF NOT EXISTS photos (
+            id TEXT PRIMARY KEY, record_type TEXT, record_id TEXT,
+            caption TEXT, data TEXT, created_at TEXT
+        )",
+        "CREATE TABLE IF NOT EXISTS production_log (
+            id TEXT PRIMARY KEY, equipment_id TEXT,
+            period_start TEXT, period_end TEXT,
+            planned_minutes DOUBLE PRECISION, total_count DOUBLE PRECISION,
+            good_count DOUBLE PRECISION, ideal_cycle_minutes DOUBLE PRECISION,
+            created_at TEXT
         )",
     ];
 
@@ -489,6 +502,38 @@ async fn apply_to_sqlite(
             .bind(js(payload, "created_at"))
             .execute(pool).await.map_err(|e| e.to_string())?;
         }
+        "photos" => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO photos
+                  (id, record_type, record_id, caption, data, created_at)
+                  VALUES (?1,?2,?3,?4,?5,?6)"
+            )
+            .bind(&id)
+            .bind(js(payload, "record_type"))
+            .bind(js(payload, "record_id"))
+            .bind(js(payload, "caption"))
+            .bind(js(payload, "data"))
+            .bind(js(payload, "created_at"))
+            .execute(pool).await.map_err(|e| e.to_string())?;
+        }
+        "production_log" => {
+            sqlx::query(
+                "INSERT OR REPLACE INTO production_log
+                  (id, equipment_id, period_start, period_end, planned_minutes,
+                   total_count, good_count, ideal_cycle_minutes, created_at)
+                  VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
+            )
+            .bind(&id)
+            .bind(js(payload, "equipment_id"))
+            .bind(js(payload, "period_start"))
+            .bind(js(payload, "period_end"))
+            .bind(js_f64(payload, "planned_minutes"))
+            .bind(js_f64(payload, "total_count"))
+            .bind(js_f64(payload, "good_count"))
+            .bind(js_f64(payload, "ideal_cycle_minutes"))
+            .bind(js(payload, "created_at"))
+            .execute(pool).await.map_err(|e| e.to_string())?;
+        }
         _ => {
             // Unknown table – ignore rather than fail the whole pull.
             return Ok(());
@@ -506,6 +551,7 @@ fn get_update_clause(table: &str) -> String {
         "rca_nodes" => "title=EXCLUDED.title, description=EXCLUDED.description, x_pos=EXCLUDED.x_pos, y_pos=EXCLUDED.y_pos",
         "capa" => "title=EXCLUDED.title, status=EXCLUDED.status, owner=EXCLUDED.owner, due_date=EXCLUDED.due_date",
         "pm_schedule" => "title=EXCLUDED.title, status=EXCLUDED.status, next_due_date=EXCLUDED.next_due_date, last_completed_at=EXCLUDED.last_completed_at",
+        "production_log" => "equipment_id=EXCLUDED.equipment_id, period_start=EXCLUDED.period_start, period_end=EXCLUDED.period_end, planned_minutes=EXCLUDED.planned_minutes, total_count=EXCLUDED.total_count, good_count=EXCLUDED.good_count, ideal_cycle_minutes=EXCLUDED.ideal_cycle_minutes, created_at=EXCLUDED.created_at",
         _ => "id=EXCLUDED.id",
     }.to_string()
 }

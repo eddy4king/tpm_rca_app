@@ -1,0 +1,32 @@
+# Self-hosted PostgreSQL sync target for TPM-RCA.
+#
+# Bring it up with:   docker compose up -d
+# Tear it down with:  docker compose down
+#
+# The app connects to it via a URL like:
+#   postgresql://tpm_rca:changing_this@localhost:5432/tpm_rca
+#
+# Tables are created automatically by the app on first sync (see
+# src-tauri/src/sync/mod.rs -> ensure_pg_tables), so no init script is needed.
+# A volume keeps your synced data across container restarts.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tpm_rca_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tpm_rca
+      POSTGRES_USER: tpm_rca
+      POSTGRES_PASSWORD: changing_this
+    ports:
+      - "5432:5432"
+    volumes:
+      - tpm_rca_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tpm_rca -d tpm_rca"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  tpm_rca_pgdata:

@@ -8,8 +8,19 @@ import {
 
 type Mode = "loading" | "setup" | "login" | "forgot_username" | "forgot_answer" | "forgot_reset";
 
+interface SsoConfig {
+  enabled: boolean;
+  label: string;
+  issuer: string;
+}
+
+interface LdapConfig {
+  enabled: boolean;
+  label: string;
+}
+
 function LoginPage() {
-  const { login } = useAuth();
+  const { login, ssoLogin, ldapLogin } = useAuth();
   const [mode, setMode] = useState<Mode>("loading");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -17,8 +28,14 @@ function LoginPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [ssoLoading, setSsoLoading] = useState(false);
+  const [ldapLoading, setLdapLoading] = useState(false);
+  const [ldapUser, setLdapUser] = useState("");
+  const [ldapPass, setLdapPass] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [ssoConfig, setSsoConfig] = useState<SsoConfig>({ enabled: false, label: "Single Sign-On", issuer: "" });
+  const [ldapConfig, setLdapConfig] = useState<LdapConfig>({ enabled: false, label: "LDAP" });
 
   // Forgot password flow state
   const [forgotUsername, setForgotUsername] = useState("");
@@ -33,10 +50,39 @@ function LoginPage() {
     try {
       localStorage.removeItem("session_token");
       await invoke("clear_all_sessions").catch(() => {});
-      const hasUsers = await invoke<boolean>("has_users");
+      const [hasUsers, sso, ldap] = await Promise.all([
+        invoke<boolean>("has_users"),
+        invoke<SsoConfig>("get_sso_config").catch(() => ({ enabled: false, label: "Single Sign-On", issuer: "" })),
+        invoke<LdapConfig>("get_ldap_config").catch(() => ({ enabled: false, label: "LDAP" })),
+      ]);
+      setSsoConfig(sso);
+      setLdapConfig(ldap);
       setMode(hasUsers ? "login" : "setup");
     } catch {
       setMode("setup");
+    }
+  }
+
+  async function handleSso() {
+    setSsoLoading(true);
+    setError(null);
+    try {
+      await ssoLogin();
+    } catch (err) {
+      setError(String(err));
+      setSsoLoading(false);
+    }
+  }
+
+  async function handleLdap() {
+    if (!ldapUser || !ldapPass) { setError("LDAP username and password are required."); return; }
+    setLdapLoading(true);
+    setError(null);
+    try {
+      await ldapLogin(ldapUser, ldapPass);
+    } catch (err) {
+      setError(String(err));
+      setLdapLoading(false);
     }
   }
 
@@ -223,6 +269,36 @@ function LoginPage() {
               <button onClick={handleLogin} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white py-3 rounded-xl font-medium mt-6 transition-colors duration-150">
                 {loading ? "Signing in..." : "Sign In"}
               </button>
+              {ssoConfig.enabled && (
+                <>
+                  <div className="flex items-center gap-3 my-4">
+                    <div className="h-px flex-1 bg-slate-200" />
+                    <span className="text-xs text-slate-400">or</span>
+                    <div className="h-px flex-1 bg-slate-200" />
+                  </div>
+                  <button onClick={handleSso} disabled={ssoLoading} className="w-full bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 py-3 rounded-xl font-medium transition-colors duration-150">
+                    {ssoLoading ? "Waiting for authentication…" : `Sign in with ${ssoConfig.label}`}
+                  </button>
+                </>
+              )}
+
+              {ldapConfig.enabled && (
+                <div className="mt-6 pt-6 border-t border-slate-100">
+                  <p className="text-xs font-semibold text-slate-500 mb-3">Sign in with {ldapConfig.label}</p>
+                  <div className="space-y-3">
+                    <input placeholder="LDAP username" value={ldapUser} onChange={e => setLdapUser(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                    <div className="relative">
+                      <input placeholder="LDAP password" type={showPassword ? "text" : "password"} value={ldapPass} onChange={e => setLdapPass(e.target.value)} className="w-full border border-slate-300 rounded-xl px-4 py-3 text-sm pr-12 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600">
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <button onClick={handleLdap} disabled={ldapLoading} className="w-full bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 py-3 rounded-xl font-medium transition-colors duration-150">
+                      {ldapLoading ? "Authenticating…" : `Sign in with ${ldapConfig.label}`}
+                    </button>
+                  </div>
+                </div>
+              )}
               <button onClick={() => { setMode("forgot_username"); setError(null); }} className="text-xs text-blue-600 hover:text-blue-700 text-center w-full mt-3">
                 Forgot password?
               </button>

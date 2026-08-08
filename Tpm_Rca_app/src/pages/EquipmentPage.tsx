@@ -31,6 +31,8 @@ import { exportToCsv } from "../lib/export";
 import { parseCsv, normalizeHeader } from "../lib/csv";
 import { downtimeCost, formatCurrency } from "../lib/finance";
 import QrCode, { equipmentQrValue, parseEquipmentQr } from "../components/QrCode";
+import { nfcSupported } from "../lib/nfc";
+import NfcTagWriter from "../components/NfcTagWriter";
 
 interface Equipment {
   id: string;
@@ -597,6 +599,11 @@ function EquipmentPage() {
                 label={eq.tag_number || eq.id}
               />
             </div>
+            {nfcSupported() && (
+              <div className="col-span-2 md:col-span-3">
+                <NfcTagWriter id={eq.id} tag={eq.tag_number} />
+              </div>
+            )}
           </div>
 
           {canEditEquipment && (

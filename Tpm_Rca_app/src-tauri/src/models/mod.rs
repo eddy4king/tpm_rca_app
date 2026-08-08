@@ -336,6 +336,33 @@ pub struct NotificationPref {
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct KaizenSuggestion {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub submitted_by: Option<String>,
+    pub area_id: Option<String>,
+    pub status: String,
+    pub votes: i64,
+    pub implemented_by: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
+pub struct ProductionLog {
+    pub id: String,
+    pub equipment_id: String,
+    pub period_start: Option<String>,
+    pub period_end: Option<String>,
+    pub planned_minutes: f64,
+    pub total_count: f64,
+    pub good_count: f64,
+    pub ideal_cycle_minutes: f64,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow, Clone)]
 pub struct ReportSchedule {
     pub id: String,
     pub name: String,

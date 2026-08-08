@@ -209,33 +209,49 @@ Combines the transactional CMMS gaps (inventory, work orders, etc.) identified i
 gap analysis with the competitive differentiators from §12 into four delivery phases.
 Features already shipped — Authentication, RBAC, Equipment Register, Downtime, RCA,
 FMEA, CAPA, CbM, PM Scheduler, KPI/OEE Dashboard, Audit Log, Knowledge Base, AI RCA
-Coach, Offline‑first Sync, i18n and Theming — are excluded below.
+Coach, Offline-first Sync, i18n and Theming — are excluded below.
 
-### Phase 1 — Transactional CMMS Core (highest priority)
-*Goal: make the product viable as a day‑to‑day work‑management system.*
-- **Spare‑Parts & Inventory** — stock items, min/max levels, reorder alerts, issue/return against work orders.
-- **Unified Work Orders** — single WO entity linking PM / downtime / tasks with labor, parts, cost and approvals (replaces the current separate lists).
-- **Notification & Alert Engine** — email / SMS / push plus auto‑triggers (PM due, CbM threshold breach, overdue work orders); extends the existing in‑app toasts.
+Status legend: ✅ Done · 🟡 Partial · ⬜ Not started
 
-### Phase 2 — Reporting & Enterprise Readiness
-- **PDF & Scheduled Reports** — printable work‑order / history / audit reports and scheduled delivery (today only CSV export exists).
-- **SSO / OAuth / LDAP** — enterprise login alongside local accounts.
-- **Labor & Timesheet Capture** — actual time and cost on work orders (extends the existing `assigned_to`).
-- **Calendar / Gantt View** — visual PM & work‑order scheduling (today list‑only).
+### Phase 1 — Transactional CMMS Core (highest priority) ✅
+*Goal: make the product viable as a day-to-day work-management system.*
+- **Spare-Parts & Inventory** ✅ — stock items, min/max levels, reorder alerts, issue/return against work orders (`InventoryPage`, `inventory` commands).
+- **Unified Work Orders** ✅ — single WO entity linking PM / downtime / tasks with labor, parts, cost and approvals (`WorkOrdersPage`).
+- **Notification & Alert Engine** 🟡 — in-app toasts + auto-triggers (PM due, CbM breach, overdue WO) done and run on a background scheduler; **email / SMS / push delivery not yet implemented** (only report emails via optional SMTP).
 
-### Phase 3 — Integrations & Mobility
-- **ERP / SCADA / IIoT Connectors** — SAP, IBM Maximo, OSIsoft PI beyond the generic webhook; the existing PostgreSQL sync remains the open sync target.
-- **Mobile / PWA Field App** — offline‑first technician client with camera QR / NFC lookup (builds on the current offline‑first architecture).
-- **Vendor / Warranty / Contract Management** — link assets to suppliers, warranties and service contracts.
+### Phase 2 — Reporting & Enterprise Readiness ✅
+- **PDF & Scheduled Reports** ✅ — printable WO PDF (`report.ts`) + scheduled CSV delivery with an automated background runner (`run_due_reports`) and optional SMTP email.
+- **SSO / OAuth / LDAP** ✅ — OIDC authorization-code flow with JWKS RS256 verification (`services/sso.rs`) + LDAP simple-bind (plaintext). *Caveats: no refresh-token; LDAP is plaintext only.*
+- **Labor & Timesheet Capture** ✅ — actual time and cost on work orders (`TimesheetsPage`).
+- **Calendar / Gantt View** ✅ — visual PM & work-order scheduling incl. Gantt (`SchedulePage`).
 
-### Phase 4 — Advanced TPM Differentiators (from §12)
-- **Zero‑Friction Shop‑Floor Capture** (§12‑5): voice entry, one‑tap downtime, NFC.
-- **TPM Culture Features** (§12‑6): OEE leaderboards per line, Kaizen/CIP board, operator recognition.
-- **Open & Portable by Default** (§12‑7): self‑hosted sync, full export, no per‑seat lock‑in.
-- **Structured Work Checklists / SOP** — store checklists against work orders / PM (today only AI‑suggested).
-- **Permit‑to‑Work / LOTO / Safety** — optional safety gate before high‑risk work.
+### Phase 3 — Integrations & Mobility ⬜ (next phase)
+- **ERP / SCADA / IIoT Connectors** ⬜ — only a generic `create_issue` webhook stub exists; no SAP / Maximo / OSIsoft PI. PostgreSQL sync remains the open sync target.
+- **Mobile / PWA Field App** ⬜ — offline-first technician client with camera QR / NFC lookup not started.
+- **Vendor / Warranty / Contract Management** ⬜ — `inventory_items.supplier_id` exists but there is no vendor table or UI.
+
+### Phase 4 — Advanced TPM Differentiators (from §12) 🟡 (mostly done)
+- **Zero-Friction Shop-Floor Capture** (§12-5) 🟡 — voice entry, one-tap downtime, QR, LAN peer-sync done; **NFC not implemented**.
+- **TPM Culture Features** (§12-6) ✅ — OEE leaderboards per line, Kaizen/CIP board, operator recognition (`KaizenPage`).
+- **Open & Portable by Default** (§12-7) 🟡 — offline export + peer sync done; **`docker-compose.yml` self-host and "portability report" not done**.
+- **Structured Work Checklists / SOP** ⬜ — only AI-suggested text; no stored/reusable checklists.
+- **Permit-to-Work / LOTO / Safety** ⬜ — no safety gate before high-risk work.
+
+### Next Phases — To Be Added (remaining backlog)
+Prioritised by leverage vs. effort. Each item is currently ⬜ unless noted.
+
+1. **Notification email/SMS/push delivery** 🟡 — wire the existing alert engine to the SMTP/notify-webhook path so PM-due / WO-overdue / CbM alerts are actually delivered (highest daily impact).
+2. **Open & Portable packaging** — add `docker-compose.yml` for the Postgres sync target + a "portability report" showing what leaves the device.
+3. **Vendor / Warranty / Contract management** — vendor table + link assets/parts; warranty & service-contract tracking.
+4. **NFC tag capture** — extend `TagScanner` / scanner with NFC alongside QR.
+5. **Structured Work Checklists / SOP** — store reusable checklists against work orders / PM.
+6. **Permit-to-Work / LOTO / Safety** — optional safety gate before high-risk work.
+7. **Mobile / PWA Field App** — offline-first technician client.
+8. **ERP / SCADA / IIoT Connectors** — SAP / Maximo / OSIsoft PI beyond the generic webhook.
+9. **Reliability depth finish** — RUL estimates + per-equipment performance/quality so OEE ≠ availability.
+10. **LDAP TLS / refresh-token for SSO** — harden the enterprise-auth additions.
 
 ### Recommended sequence
-Phase 1 → Phase 2 (Reporting + SSO) → Phase 3 (Integrations first, then Mobile) → Phase 4.
+Phase 1 ✅ → Phase 2 ✅ → **Phase 3 (Integrations first, then Mobile)** → Phase 4 finish (Docker/portability, NFC, SOP, LOTO).
 
 End of Document

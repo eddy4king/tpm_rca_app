@@ -22,13 +22,19 @@ import WorkOrdersPage from "./pages/WorkOrdersPage";
 import TimesheetsPage from "./pages/TimesheetsPage";
 import SchedulePage from "./pages/SchedulePage";
 import ReportsPage from "./pages/ReportsPage";
+import KaizenPage from "./pages/KaizenPage";
+import OeePage from "./pages/OeePage";
 
 import UsersPage from "./pages/UsersPage";
 import LoginPage from "./pages/LoginPage";
+import AboutPage from "./pages/AboutPage";
+import PortabilityPage from "./pages/PortabilityPage";
 import Sidebar from "./components/Sidebar";
+import Assistant from "./components/Assistant";
 import { TourProvider } from "./context/TourContext";
+import { AssistantProvider, useAssistant } from "./context/AssistantContext";
 
-type Page = "equipment" | "downtime" | "rca" | "capa" | "dashboard" | "pm" | "hierarchy" | "tasks" | "timeline" | "audit" | "sync" | "fmea" | "cbm" | "knowledge" | "financials" | "inventory" | "workorders" | "timesheets" | "schedule" | "reports" | "users";
+type Page = "equipment" | "downtime" | "rca" | "capa" | "dashboard" | "pm" | "hierarchy" | "tasks" | "timeline" | "audit" | "sync" | "fmea" | "cbm" | "knowledge" | "financials" | "inventory" | "workorders" | "timesheets" |   "schedule" | "reports" | "kaizen" | "oee" | "users" | "about" | "portability";
 
 function AppInner() {
   const { user, isAdmin, isLoading } = useAuth();
@@ -81,6 +87,8 @@ function AppInner() {
     { key: "timesheets", label: "Timesheets" },
     { key: "schedule", label: "Schedule" },
     { key: "reports", label: "Reports" },
+    { key: "kaizen", label: "Kaizen" },
+    { key: "oee", label: "OEE" },
     { key: "sync", label: "Sync" },
   ] as const;
 
@@ -89,43 +97,78 @@ function AppInner() {
     ? baseNav.filter(item => role.permissions.includes("*") || role.permissions.includes(item.key))
     : baseNav;
 
-  // Admins keep the Users page regardless of permissions.
-  const navItems = isAdmin ? [...permittedNav, { key: "users", label: "Users" }] : permittedNav;
+  // Admins keep the Users page regardless of permissions; everyone gets About
+  // and the informational Portability report.
+  const navItems = isAdmin
+    ? [...permittedNav, { key: "users", label: "Users" }, { key: "about", label: "About" }, { key: "portability", label: "Portability" }]
+    : [...permittedNav, { key: "about", label: "About" }, { key: "portability", label: "Portability" }];
 
   return (
     <TourProvider navigate={(p) => setActivePage(p as Page)}>
-      <div className="h-screen flex bg-slate-50 text-slate-800">
-        <Sidebar
-          navItems={navItems as { key: string; label: string }[]}
+      <AssistantProvider>
+        <Shell
           activePage={activePage}
-          onNavigate={(p) => setActivePage(p as Page)}
+          setActivePage={setActivePage}
+          navItems={navItems as { key: string; label: string }[]}
         />
-        <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
-          {activePage === "dashboard" && <DashboardPage onNavigate={(p) => setActivePage(p as Page)} />}
-          {activePage === "equipment" && <EquipmentPage />}
-          {activePage === "downtime" && <DowntimePage />}
-          {activePage === "rca" && <RcaPage />}
-          {activePage === "capa" && <CAPAPage />}
-          {activePage === "pm" && <PMSchedulePage />}
-          {activePage === "hierarchy" && <HierarchyPage />}
-          {activePage === "tasks" && <TasksPage />}
-          {activePage === "timeline" && <TimelinePage />}
-          {activePage === "audit" && <AuditPage />}
-          {activePage === "sync" && <SyncPage />}
-          {activePage === "fmea" && <FmeaPage />}
-          {activePage === "cbm" && <CbmPage />}
-          {activePage === "knowledge" && <KnowledgePage />}
-          {activePage === "financials" && <FinancialsPage />}
-          {activePage === "inventory" && <InventoryPage />}
-          {activePage === "workorders" && <WorkOrdersPage />}
-          {activePage === "timesheets" && <TimesheetsPage />}
-          {activePage === "schedule" && <SchedulePage onNavigate={(p) => setActivePage(p as Page)} />}
-          {activePage === "reports" && <ReportsPage />}
-
-          {activePage === "users" && <UsersPage />}
-        </main>
-      </div>
+      </AssistantProvider>
     </TourProvider>
+  );
+}
+
+function Shell({
+  activePage,
+  setActivePage,
+  navItems,
+}: {
+  activePage: Page;
+  setActivePage: (p: Page) => void;
+  navItems: { key: string; label: string }[];
+}) {
+  const { setPage } = useAssistant();
+
+  // Keep the assistant aware of the current page for contextual tips.
+  useEffect(() => {
+    setPage(activePage);
+  }, [activePage, setPage]);
+
+  return (
+    <div className="h-screen flex bg-slate-50 text-slate-800">
+      <Sidebar
+        navItems={navItems}
+        activePage={activePage}
+        onNavigate={(p) => setActivePage(p as Page)}
+      />
+      <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        {activePage === "dashboard" && <DashboardPage onNavigate={(p) => setActivePage(p as Page)} />}
+        {activePage === "equipment" && <EquipmentPage />}
+        {activePage === "downtime" && <DowntimePage />}
+        {activePage === "rca" && <RcaPage />}
+        {activePage === "capa" && <CAPAPage />}
+        {activePage === "pm" && <PMSchedulePage />}
+        {activePage === "hierarchy" && <HierarchyPage />}
+        {activePage === "tasks" && <TasksPage />}
+        {activePage === "timeline" && <TimelinePage />}
+        {activePage === "audit" && <AuditPage />}
+        {activePage === "sync" && <SyncPage />}
+        {activePage === "fmea" && <FmeaPage />}
+        {activePage === "cbm" && <CbmPage />}
+        {activePage === "knowledge" && <KnowledgePage />}
+        {activePage === "financials" && <FinancialsPage />}
+        {activePage === "inventory" && <InventoryPage />}
+        {activePage === "workorders" && <WorkOrdersPage />}
+        {activePage === "timesheets" && <TimesheetsPage />}
+        {activePage === "schedule" && <SchedulePage onNavigate={(p) => setActivePage(p as Page)} />}
+        {activePage === "reports" && <ReportsPage />}
+        {activePage === "kaizen" && <KaizenPage />}
+        {activePage === "oee" && <OeePage />}
+
+        {activePage === "users" && <UsersPage />}
+        {activePage === "about" && <AboutPage />}
+        {activePage === "portability" && <PortabilityPage />}
+      </main>
+      <Assistant />
+    </div>
   );
 }
 

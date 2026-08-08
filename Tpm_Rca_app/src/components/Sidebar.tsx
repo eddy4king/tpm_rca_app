@@ -1,4 +1,4 @@
-import { LucideIcon, LayoutDashboard, Cog, Network, Activity, Workflow, ClipboardCheck, CalendarClock, ListTodo, GitCommitVertical, History, Users, RefreshCw, Circle, LogOut, HelpCircle, ShieldAlert, Gauge, BookOpen, DollarSign } from "lucide-react";
+import { LucideIcon, LayoutDashboard, Cog, Network, Activity, Workflow, ClipboardCheck, CalendarClock, ListTodo, GitCommitVertical, History, Users, RefreshCw, Circle, LogOut, HelpCircle, ShieldAlert, Gauge, BookOpen, DollarSign, Info, Lightbulb, Factory, Share2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage, LANGUAGES, Lang } from "../context/LanguageContext";
 import { useTour } from "../context/TourContext";
@@ -20,8 +20,12 @@ const ICONS: Record<string, LucideIcon> = {
   cbm: Gauge,
   knowledge: BookOpen,
   financials: DollarSign,
+  kaizen: Lightbulb,
+  oee: Factory,
   users: Users,
   sync: RefreshCw,
+  about: Info,
+  portability: Share2,
 };
 
 const ROLE_BADGE: Record<string, string> = {

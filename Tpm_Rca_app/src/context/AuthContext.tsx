@@ -15,6 +15,8 @@ interface AuthContextType {
   user: SafeUser | null;
   token: string | null;
   login: (username: string, password: string) => Promise<void>;
+  ssoLogin: () => Promise<void>;
+  ldapLogin: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   isAdmin: boolean;
   isLoading: boolean;
@@ -63,6 +65,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 }
 
+  async function ssoLogin() {
+    try {
+      // Opens the provider in the browser and begins the localhost listener.
+      await invoke<string>("begin_sso_login");
+      // Blocks until the browser redirect is processed and the session is ready.
+      const [loggedInUser, sessionToken] = await invoke<[SafeUser, string]>("await_sso_login");
+      setUser(loggedInUser);
+      setToken(sessionToken);
+      localStorage.setItem("session_token", sessionToken);
+    } catch (err) {
+      throw new Error(String(err));
+    }
+  }
+
+  async function ldapLogin(username: string, password: string) {
+    try {
+      const [loggedInUser, sessionToken] = await invoke<[SafeUser, string]>("ldap_login", {
+        payload: { username, password },
+      });
+      setUser(loggedInUser);
+      setToken(sessionToken);
+      localStorage.setItem("session_token", sessionToken);
+    } catch (err) {
+      throw new Error(String(err));
+    }
+  }
+
 
   async function logout() {
     if (token) {
@@ -90,6 +119,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       token,
       login,
+      ssoLogin,
+      ldapLogin,
       logout,
       isAdmin: user?.role === "Admin",
       isLoading,

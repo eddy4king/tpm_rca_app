@@ -5,3 +5,4 @@ pub mod ai;
 pub mod reliability;
 pub mod cbm;
 pub mod notifications;
+pub mod sso;

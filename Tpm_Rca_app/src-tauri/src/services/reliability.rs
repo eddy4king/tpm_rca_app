@@ -49,7 +49,7 @@ pub struct ReliabilityReport {
     pub worst_assets: Vec<AssetReliability>,
 }
 
-fn parse_ts(raw: &str) -> Option<NaiveDateTime> {
+pub(crate) fn parse_ts(raw: &str) -> Option<NaiveDateTime> {
     let owned = raw.trim().replace('T', " ");
     let base = owned.split('.').next().unwrap_or(&owned);
     let base = base.trim();

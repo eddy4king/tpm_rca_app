@@ -10,11 +10,22 @@ pub struct RoleInfo {
 
 /// Nav/page keys used by the frontend for navigation gating.
 /// These MUST stay in sync with the `Page` union in `src/App.tsx`.
-fn all_pages() -> Vec<String> {
+fn engineer_pages() -> Vec<String> {
     vec![
-        "dashboard", "equipment", "hierarchy", "downtime", "rca", "capa",
-        "pm", "tasks", "timeline", "audit", "fmea", "cbm", "sync", "knowledge", "financials",
-        "inventory", "workorders", "timesheets", "schedule", "reports",
+        "dashboard", "equipment", "hierarchy", "downtime", "pm", "tasks", "timeline",
+        "rca", "capa", "fmea", "cbm", "workorders", "timesheets", "inventory",
+        "knowledge", "financials", "reports", "schedule", "kaizen", "audit",
+    ]
+    .into_iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
+/// Read-only overview pages suitable for stakeholders / viewers.
+fn viewer_pages() -> Vec<String> {
+    vec![
+        "dashboard", "equipment", "hierarchy", "timeline",
+        "financials", "reports", "kaizen", "audit",
     ]
     .into_iter()
     .map(|s| s.to_string())
@@ -36,22 +47,23 @@ pub async fn get_role_permissions() -> Result<Vec<RoleInfo>, String> {
         RoleInfo {
             name: "Engineer".into(),
             description: "All modules — read/write on RCA, CAPA, PM, Downtime".into(),
-            permissions: all_pages(),
+            permissions: engineer_pages(),
         },
         RoleInfo {
             name: "Technician".into(),
             description: "Downtime Logger & PM Scheduler read/write; core modules read-only".into(),
-            permissions: vec![
-                "dashboard", "equipment", "hierarchy", "downtime", "pm", "tasks", "timeline",
-            ]
+        permissions: vec![
+            "dashboard", "equipment", "hierarchy", "downtime", "pm", "tasks", "timeline",
+            "kaizen",
+        ]
             .into_iter()
             .map(|s| s.to_string())
             .collect(),
         },
         RoleInfo {
             name: "Viewer".into(),
-            description: "Read-only access to all modules".into(),
-            permissions: all_pages(),
+            description: "Read-only overview: dashboard, financials, reports, leaderboard".into(),
+            permissions: viewer_pages(),
         },
     ];
     Ok(roles)
@@ -75,11 +87,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn viewer_sees_all_pages_but_not_wildcard() {
+    async fn viewer_sees_overview_pages_but_not_wildcard() {
         let roles = get_role_permissions().await.unwrap();
         let viewer = roles.iter().find(|r| r.name == "Viewer").unwrap();
         assert!(viewer.permissions.contains(&"dashboard".to_string()));
-        assert!(viewer.permissions.contains(&"sync".to_string()));
+        assert!(viewer.permissions.contains(&"reports".to_string()));
+        assert!(viewer.permissions.contains(&"kaizen".to_string()));
+        assert!(!viewer.permissions.contains(&"rca".to_string()));
+        assert!(!viewer.permissions.contains(&"sync".to_string()));
         assert!(!viewer.permissions.contains(&"*".to_string()));
     }
 
@@ -88,6 +103,7 @@ mod tests {
         let roles = get_role_permissions().await.unwrap();
         let tech = roles.iter().find(|r| r.name == "Technician").unwrap();
         assert!(tech.permissions.contains(&"downtime".to_string()));
+        assert!(tech.permissions.contains(&"kaizen".to_string()));
         assert!(!tech.permissions.contains(&"rca".to_string()));
     }
 }

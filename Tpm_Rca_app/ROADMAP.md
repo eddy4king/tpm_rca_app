@@ -7,6 +7,21 @@ and **QR-native** asset workflows.
 
 Priority order is roughly top-to-bottom; 1 and 2 are the biggest wedges.
 
+## Implementation Status
+
+| # | Feature | Status | Notes |
+|---|---------|--------|-------|
+| 1 | AI RCA Coach ("Ruca" upgraded) | ✅ Done | `components/RcaCoach.tsx`, `lib/rcaCoach.ts`, `services/ai.rs` |
+| 2 | Reliability-Engineering Depth | ✅ Done | FMEA, failure Pareto, MTBF/MTTR, Weibull, RUL, and real OEE (A×P×Q from production logs) |
+| 3 | Financial Visibility | ✅ Done | `lib/finance.ts`, `FinancialsPage`, `cost_per_hour`/`asset_value` |
+| 4 | Tribal-Knowledge Capture | ✅ Done | `KnowledgePage` + `knowledge` tables/commands |
+| 5 | Zero-Friction Shop-Floor Capture | ✅ Done | Voice, QR (camera + paste), LAN peer-sync done; **NFC read + tag provisioning (write) implemented** (`components/TagScanner.tsx`, `components/NfcTagWriter.tsx`, `lib/nfc.ts`) |
+| 6 | TPM Culture Features | ✅ Done | OEE leaderboard, Kaizen/CIP board, operator recognition (`KaizenPage`) |
+| 7 | Open & Portable by Default | ✅ Done | Offline export + peer sync done; `docker-compose.yml` added (Postgres sync target); **portability report page shipped** (`pages/PortabilityPage.tsx`) |
+
+Status legend: ✅ Done · 🟡 Partial. See `Product Requirements Document.md` §13 for the
+phased plan and the remaining Phase 3 / Phase 4 backlog.
+
 ---
 
 ## 1. AI RCA Coach ("Ruca" upgraded)
@@ -145,10 +160,26 @@ docs + `docker-compose.yml`.
 
 ## Suggested Build Order
 
-1. **#1 AI RCA Coach** — highest differentiation, reuses mascot + history.
-2. **#2 Reliability Depth** — high value, builds on existing metrics.
-3. **#5 Shop-Floor Capture** — closes known PRD gaps, drives adoption.
-4. **#3 Financial Visibility** — quick win, sells up the chain.
-5. **#4 Tribal Knowledge** — strengthens retention/value.
-6. **#6 TPM Culture** — adoption/engagement layer.
-7. **#7 Open & Portable** — positioning/messaging + packaging polish.
+1. **#1 AI RCA Coach** — highest differentiation, reuses mascot + history. ✅ *shipped*
+2. **#2 Reliability Depth** — high value, builds on existing metrics. 🟡 *partial*
+3. **#5 Shop-Floor Capture** — closes known PRD gaps, drives adoption. ✅ *shipped (NFC read + provisioning done)*
+4. **#3 Financial Visibility** — quick win, sells up the chain. ✅ *shipped*
+5. **#4 Tribal Knowledge** — strengthens retention/value. ✅ *shipped*
+6. **#6 TPM Culture** — adoption/engagement layer. ✅ *shipped*
+7. **#7 Open & Portable** — positioning/messaging + packaging polish. ✅ *shipped (portability report + self-host done)*
+
+---
+
+## Remaining Work (next phases — see PRD §13)
+
+The phased roadmap is tracked in `Product Requirements Document.md` §13. Outstanding
+items not yet built:
+
+- **Notification email / SMS / push delivery** — alert engine fires in-app only; wire to SMTP / webhook.
+- **Vendor / Warranty / Contract management** — vendor table + asset/part linkage.
+- **Structured Work Checklists / SOP** — stored/reusable (today only AI-suggested).
+- **Permit-to-Work / LOTO / Safety** — safety gate before high-risk work.
+- **Mobile / PWA Field App** — offline-first technician client.
+- **ERP / SCADA / IIoT Connectors** — SAP / Maximo / OSIsoft PI beyond the generic webhook.
+- **Reliability finish** — RUL estimates + per-equipment performance/quality.
+- **Enterprise-auth hardening** — LDAP TLS, SSO refresh tokens.
