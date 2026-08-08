@@ -1,10 +1,18 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   answerQuestion,
   tipsForPage,
   pageLabel,
   SUGGESTED_QUESTIONS,
+  askRuca,
+  getLlmConfig,
 } from "./assistant";
+
+const invokeMock = vi.fn();
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (cmd: string, args?: unknown) => invokeMock(cmd, args),
+}));
 
 describe("assistant brain", () => {
   it("returns contextual tips for a known page", () => {
@@ -40,5 +48,61 @@ describe("assistant brain", () => {
     const a = answerQuestion("tell me a joke");
     expect(a.length).toBeGreaterThan(0);
     expect(SUGGESTED_QUESTIONS.length).toBeGreaterThan(0);
+  });
+});
+
+describe("askRuca (LLM with offline fallback)", () => {
+  beforeEach(() => invokeMock.mockReset());
+  afterEach(() => invokeMock.mockReset());
+
+  it("returns the LLM answer when enabled and reachable", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_llm_config") return Promise.resolve({ enabled: true, provider: "ollama", baseUrl: "http://localhost:11434", model: "llama3.2", apiKey: "" });
+      if (cmd === "ask_llm") return Promise.resolve("Check the PM schedule for pump 1.");
+      return Promise.reject(new Error("unexpected " + cmd));
+    });
+    const a = await askRuca("When is pump 1 due?", "pm");
+    expect(a).toBe("Check the PM schedule for pump 1.");
+  });
+
+  it("falls back to the offline KB when the model is disabled", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_llm_config") return Promise.resolve({ enabled: false, provider: "ollama", baseUrl: "http://localhost:11434", model: "llama3.2", apiKey: "" });
+      return Promise.reject(new Error("unexpected " + cmd));
+    });
+    const a = await askRuca("How do I back up the database?", "downtime");
+    expect(a.toLowerCase()).toContain("backup");
+  });
+
+  it("falls back to the offline KB when the LLM call fails", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_llm_config") return Promise.resolve({ enabled: true, provider: "ollama", baseUrl: "http://localhost:11434", model: "llama3.2", apiKey: "" });
+      return Promise.reject(new Error("Could not reach Ollama"));
+    });
+    const a = await askRuca("set up postgres sync", "sync");
+    expect(a.toLowerCase()).toContain("postgres");
+  });
+
+  it("passes history and page context through to the ask_llm command", async () => {
+    let seen: unknown;
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "get_llm_config") return Promise.resolve({ enabled: true, provider: "ollama", baseUrl: "http://localhost:11434", model: "llama3.2", apiKey: "" });
+      if (cmd === "ask_llm") { seen = args; return Promise.resolve("ok"); }
+      return Promise.reject(new Error("unexpected " + cmd));
+    });
+    await askRuca("What is MTTR?", "dashboard", [{ role: "user", content: "hi" }]);
+    expect(seen).toBeTruthy();
+    const args = seen as { message: string; page: string | null; history: unknown[] };
+    expect(args.message).toBe("What is MTTR?");
+    expect(args.page).toBe("dashboard");
+    expect(args.history).toHaveLength(1);
+  });
+
+  it("returns the default config shape when the backend is missing", async () => {
+    invokeMock.mockRejectedValue(new Error("not in window.__TAURI__"));
+    const cfg = await getLlmConfig();
+    expect(cfg.enabled).toBe(false);
+    expect(cfg.provider).toBe("ollama");
+    expect(cfg.model).toBeTruthy();
   });
 });

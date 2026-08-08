@@ -292,3 +292,61 @@ export const SUGGESTED_QUESTIONS = [
   "How do I log downtime offline?",
   "How does sync & backup work?",
 ];
+
+export interface LlmConfig {
+  enabled: boolean;
+  provider: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+const DEFAULT_LLM_CONFIG: LlmConfig = {
+  enabled: false,
+  provider: "ollama",
+  baseUrl: "http://localhost:11434",
+  model: "llama3.2",
+  apiKey: "",
+};
+
+export async function getLlmConfig(): Promise<LlmConfig> {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const cfg = await invoke<LlmConfig>("get_llm_config");
+    return { ...DEFAULT_LLM_CONFIG, ...cfg };
+  } catch {
+    return { ...DEFAULT_LLM_CONFIG };
+  }
+}
+
+/**
+ * Asks the LLM for an answer. Falls back to the offline knowledge base
+ * whenever the model is not configured or unreachable, so the assistant
+ * always answers something useful.
+ */
+export async function askRuca(
+  question: string,
+  page?: string,
+  history?: ChatMessage[],
+): Promise<string> {
+  let llmAnswer: string | undefined;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const cfg = await invoke<LlmConfig>("get_llm_config");
+    if (cfg.enabled) {
+      llmAnswer = await invoke<string>("ask_llm", {
+        message: question,
+        page: page ?? null,
+        history: history ?? [],
+      });
+    }
+  } catch {
+    // Model not configured or unreachable → fall through to the KB.
+  }
+  return (llmAnswer && llmAnswer.trim()) || answerQuestion(question, page);
+}

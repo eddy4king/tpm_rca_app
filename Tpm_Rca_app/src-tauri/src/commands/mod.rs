@@ -28,6 +28,8 @@ pub mod notifications;
 pub mod workorders;
 pub mod import;
 pub use import::import_equipment_csv;
+pub mod llm;
+pub use llm::{ask_llm, get_llm_config, set_llm_config};
 
 #[tauri::command]
 pub async fn export_peer_snapshot(

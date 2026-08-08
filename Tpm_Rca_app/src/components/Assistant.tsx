@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { MessageCircle, X, Send, Sparkles, HelpCircle, RotateCcw } from "lucide-react";
+import { MessageCircle, X, Send, Sparkles, HelpCircle, RotateCcw, Settings, Cpu } from "lucide-react";
 import TourMascot from "./TourMascot";
 import { useTour } from "../context/TourContext";
 import { useAssistant } from "../context/AssistantContext";
 import {
-  answerQuestion,
   tipsForPage,
   pageLabel,
   SUGGESTED_QUESTIONS,
+  askRuca,
+  getLlmConfig,
+  type LlmConfig,
 } from "../lib/assistant";
 
 interface Msg {
@@ -23,8 +25,15 @@ export default function Assistant() {
   const { openHelp, startTour } = useTour();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [llm, setLlm] = useState<LlmConfig | null>(null);
+  const [saving, setSaving] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const currentPage = page ?? undefined;
+
+  useEffect(() => {
+    getLlmConfig().then(setLlm).catch(() => {});
+  }, []);
 
   // Seed a contextual greeting + tips when the panel opens.
   useEffect(() => {
@@ -66,9 +75,39 @@ export default function Assistant() {
     const q = text.trim();
     if (!q) return;
     setMessages((m) => [...m, { id: nextId++, from: "user", text: q }]);
-    const reply = answerQuestion(q, currentPage);
-    setMessages((m) => [...m, { id: nextId++, from: "ruca", text: reply }]);
     setInput("");
+    const history = messages
+      .filter((m) => m.from === "user" || m.from === "ruca")
+      .slice(-10)
+      .map((m): { role: "user" | "assistant"; content: string } => ({
+        role: m.from === "user" ? "user" : "assistant",
+        content: m.text,
+      }));
+    void askRuca(q, currentPage, history).then((reply) => {
+      setMessages((m) => [...m, { id: nextId++, from: "ruca", text: reply }]);
+    });
+  }
+
+  async function saveLlmConfig() {
+    if (!llm) return;
+    setSaving(true);
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const updated = await invoke<LlmConfig>("set_llm_config", {
+        payload: {
+          enabled: llm.enabled,
+          provider: llm.provider,
+          baseUrl: llm.baseUrl,
+          model: llm.model,
+          apiKey: llm.apiKey,
+        },
+      });
+      setLlm({ ...llm, ...updated });
+    } catch (err) {
+      setMessages((m) => [...m, { id: nextId++, from: "ruca", text: `Could not save LLM settings: ${err}` }]);
+    } finally {
+      setSaving(false);
+    }
   }
 
   if (!open) {
@@ -90,16 +129,101 @@ export default function Assistant() {
         <TourMascot size={34} />
         <div className="leading-tight">
           <p className="font-semibold text-sm">Ruca Assistant</p>
-          <p className="text-[11px] text-indigo-100">Contextual help · offline</p>
+          <p className="text-[11px] text-indigo-100">
+            {llm?.enabled ? (
+              <span className="inline-flex items-center gap-1">
+                <Cpu className="w-3 h-3" /> {llm.provider} · {llm.model}
+              </span>
+            ) : (
+              "Contextual help · offline"
+            )}
+          </p>
         </div>
+        <button
+          onClick={() => setShowSettings((v) => !v)}
+          aria-label="Assistant settings"
+          className="ml-auto p-1.5 rounded-lg hover:bg-white/20"
+        >
+          <Settings className="w-4 h-4" />
+        </button>
         <button
           onClick={closeAssistant}
           aria-label="Close assistant"
-          className="ml-auto p-1.5 rounded-lg hover:bg-white/20"
+          className="p-1.5 rounded-lg hover:bg-white/20"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
+
+      {/* LLM settings */}
+      {showSettings && llm && (
+        <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 space-y-2.5">
+          <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
+            <input
+              type="checkbox"
+              checked={llm.enabled}
+              onChange={(e) => setLlm({ ...llm, enabled: e.target.checked })}
+              className="w-4 h-4 accent-indigo-600"
+            />
+            Enable a language model
+          </label>
+          {llm.enabled && (
+            <>
+              <div className="flex gap-2">
+                {["ollama", "openai"].map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setLlm({ ...llm, provider: p, baseUrl: p === "ollama" ? "http://localhost:11434" : "https://api.openai.com/v1" })}
+                    className={`flex-1 text-xs px-2 py-1.5 rounded-lg border transition capitalize ${
+                      llm.provider === p
+                        ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-200"
+                        : "border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+              <input
+                value={llm.baseUrl}
+                onChange={(e) => setLlm({ ...llm, baseUrl: e.target.value })}
+                placeholder="Base URL (e.g. http://localhost:11434)"
+                className="w-full text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              />
+              <input
+                value={llm.model}
+                onChange={(e) => setLlm({ ...llm, model: e.target.value })}
+                placeholder="Model (e.g. llama3.2, gpt-4o-mini)"
+                className="w-full text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              />
+              {llm.provider === "openai" && (
+                <input
+                  value={llm.apiKey}
+                  onChange={(e) => setLlm({ ...llm, apiKey: e.target.value })}
+                  type="password"
+                  placeholder="API key (OpenAI-compatible)"
+                  className="w-full text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                />
+              )}
+              <button
+                onClick={saveLlmConfig}
+                disabled={saving}
+                className="w-full text-xs font-medium px-2 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {saving ? "Saving…" : "Save settings"}
+              </button>
+              <p className="text-[10px] text-slate-400">
+                Needs the Ruca assistant to stay offline? When no LLM is reachable, Ruca falls back to its built-in knowledge base.
+              </p>
+            </>
+          )}
+          {!llm.enabled && (
+            <p className="text-[10px] text-slate-400">
+              Keep Ruca fully offline. When enabled, answer quality depends on the model you connect.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-slate-50 dark:bg-slate-900">
